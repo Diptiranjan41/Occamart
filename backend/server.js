@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import cors from 'cors';
+import mongoose from 'mongoose';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -124,12 +125,13 @@ if (process.env.FRONTEND_URL) {
     allowedOrigins.push(process.env.FRONTEND_URL);
 }
 
-// In development, allow all origins
-if (process.env.NODE_ENV === 'development') {
-    allowedOrigins.push('*');
-}
+// Add Vercel frontend URLs dynamically
+const vercelUrls = [
+    'https://*.vercel.app',  // All Vercel subdomains
+    'https://*.now.sh'        // Legacy Vercel domains
+];
 
-// CORS middleware
+// CORS middleware with better handling
 app.use(cors({
     origin: function (origin, callback) {
         // Allow requests with no origin (like mobile apps, curl, etc)
@@ -140,45 +142,68 @@ app.use(cors({
             return callback(null, true);
         }
         
+        // Check if origin is in allowed list
         if (allowedOrigins.indexOf(origin) !== -1) {
-            callback(null, true);
-        } else {
-            console.log('❌ CORS blocked origin:', origin);
-            callback(new Error('Not allowed by CORS'));
+            return callback(null, true);
         }
+        
+        // Check for Vercel URLs (wildcard match)
+        if (origin.includes('.vercel.app') || origin.includes('.now.sh')) {
+            return callback(null, true);
+        }
+        
+        console.log('❌ CORS blocked origin:', origin);
+        callback(new Error('Not allowed by CORS'));
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+    exposedHeaders: ['Content-Range', 'X-Content-Range']
 }));
 
 // Handle preflight requests
 app.options('*', cors());
 
 // Body parsing middleware
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Static files
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// ===== API ROUTES =====
+// ===== IMPORTANT: FIXED - ROOT API ROUTE =====
+// This was missing and causing the "Not Found - /api" error
 
-// Health check route (public)
-app.get('/api/health', (req, res) => {
-    res.json({ 
-        success: true, 
-        message: 'Server is running',
-        timestamp: new Date().toISOString(),
+/**
+ * @route   GET /api
+ * @desc    API root - returns all available endpoints
+ * @access  Public
+ */
+app.get('/api', (req, res) => {
+    // Get database status synchronously
+    const dbStatus = getDatabaseStatus();
+    
+    res.json({
+        success: true,
+        message: '🛍️ E-Commerce API is running',
+        version: '1.0.0',
         environment: process.env.NODE_ENV || 'development',
-        razorpayConfigured: !!(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET),
-        routes: {
-            products: '/api/products',
+        timestamp: new Date().toISOString(),
+        documentation: {
+            info: 'For detailed API documentation, visit /api/health',
+            baseUrl: `${req.protocol}://${req.get('host')}`
+        },
+        endpoints: {
+            health: '/api/health',
+            auth: {
+                base: '/api/auth',
+                endpoints: ['register', 'login', 'profile', 'forgot-password', 'reset-password/:token']
+            },
             users: '/api/users',
+            products: '/api/products',
             orders: '/api/orders',
             returns: '/api/returns',
             admin: '/api/admin',
-            auth: '/api/auth',
             cart: '/api/cart',
             wishlist: '/api/wishlist',
             newsletter: '/api/newsletter',
@@ -187,8 +212,105 @@ app.get('/api/health', (req, res) => {
             hero: '/api/hero-banner',
             notifications: '/api/notifications',
             payments: '/api/payments'
+        },
+        status: {
+            database: dbStatus,
+            razorpay: !!(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET),
+            email: !!(process.env.EMAIL_USER && process.env.EMAIL_PASS)
         }
     });
+});
+
+// Helper function to get database status synchronously
+function getDatabaseStatus() {
+    try {
+        if (mongoose.connection.readyState === 1) {
+            return {
+                status: '✅ Connected',
+                state: 'connected',
+                host: mongoose.connection.host,
+                name: mongoose.connection.name
+            };
+        } else {
+            const states = ['disconnected', 'connected', 'connecting', 'disconnecting'];
+            return {
+                status: '❌ Disconnected',
+                state: states[mongoose.connection.readyState] || 'unknown'
+            };
+        }
+    } catch (error) {
+        return {
+            status: '❌ Error',
+            error: error.message
+        };
+    }
+}
+
+// Async function for health check
+async function getDatabaseStatusAsync() {
+    try {
+        if (mongoose.connection.readyState === 1) {
+            return {
+                status: '✅ Connected',
+                state: 'connected',
+                host: mongoose.connection.host,
+                name: mongoose.connection.name
+            };
+        } else {
+            const states = ['disconnected', 'connected', 'connecting', 'disconnecting'];
+            return {
+                status: '❌ Disconnected',
+                state: states[mongoose.connection.readyState] || 'unknown'
+            };
+        }
+    } catch (error) {
+        return {
+            status: '❌ Error',
+            error: error.message
+        };
+    }
+}
+
+/**
+ * @route   GET /api/health
+ * @desc    Health check endpoint with detailed status
+ * @access  Public
+ */
+app.get('/api/health', async (req, res) => {
+    try {
+        const dbStatus = await getDatabaseStatusAsync();
+        
+        res.json({
+            success: true,
+            message: '✅ Server is healthy and running',
+            timestamp: new Date().toISOString(),
+            uptime: process.uptime(),
+            environment: process.env.NODE_ENV || 'development',
+            server: {
+                port: process.env.PORT || 5000,
+                node_version: process.version,
+                memory_usage: process.memoryUsage(),
+                cpu_usage: process.cpuUsage()
+            },
+            api: {
+                baseUrl: '/api',
+                version: '1.0.0',
+                status: 'operational'
+            },
+            database: dbStatus,
+            services: {
+                razorpay: !!(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) ? '✅ Configured' : '❌ Not Configured',
+                email: !!(process.env.EMAIL_USER && process.env.EMAIL_PASS) ? '✅ Configured' : '❌ Not Configured',
+                jwt: !!process.env.JWT_SECRET ? '✅ Configured' : '❌ Not Configured'
+            }
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: 'Health check failed',
+            error: error.message
+        });
+    }
 });
 
 // Debug routes (only in development)
@@ -239,6 +361,8 @@ if (process.env.NODE_ENV === 'development') {
         });
     });
 }
+
+// ===== API ROUTES =====
 
 // Auth routes
 app.use('/api/auth', authRoutes);
@@ -342,7 +466,7 @@ app.post('/api/test-newsletter', async (req, res) => {
 
 // ===== ERROR HANDLING =====
 
-// 404 handler
+// 404 handler - Must be after all routes
 app.use(notFound);
 
 // Error handler
@@ -355,6 +479,11 @@ const server = app.listen(PORT, () => {
     console.log(`📦 API Base: http://localhost:${PORT}/api`);
     console.log(`🖼️  Uploads: http://localhost:${PORT}/uploads`);
     console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+    
+    // Show critical endpoints
+    console.log(`\n🔍 === CRITICAL ENDPOINTS ===`);
+    console.log(`🏠 API Root: http://localhost:${PORT}/api`);
+    console.log(`💓 Health Check: http://localhost:${PORT}/api/health`);
     
     // Show Razorpay status
     if (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
@@ -374,125 +503,10 @@ const server = app.listen(PORT, () => {
     console.log(`🔓 Forgot password: http://localhost:${PORT}/api/auth/forgot-password`);
     console.log(`🔄 Reset password: http://localhost:${PORT}/api/auth/reset-password/:token`);
     
-    console.log(`\n👑 === ADMIN ROUTES ===`);
-    console.log(`📊 Analytics: http://localhost:${PORT}/api/admin/analytics`);
-    console.log(`📈 Stats: http://localhost:${PORT}/api/admin/stats`);
-    console.log(`📋 Recent orders: http://localhost:${PORT}/api/admin/recent-orders`);
-    console.log(`👥 Recent users: http://localhost:${PORT}/api/admin/recent-users`);
-    console.log(`⚠️  Low stock: http://localhost:${PORT}/api/admin/low-stock`);
-    console.log(`📦 All orders: http://localhost:${PORT}/api/admin/orders`);
-    console.log(`👥 All users: http://localhost:${PORT}/api/admin/users`);
-    console.log(`✏️ Update order status: http://localhost:${PORT}/api/admin/orders/:id/status`);
-    console.log(`👤 Update user role: http://localhost:${PORT}/api/admin/users/:id/role`);
-    console.log(`🚫 Toggle user status: http://localhost:${PORT}/api/admin/users/:id/status`);
-    
-    console.log(`\n📦 === ORDER ROUTES ===`);
-    console.log(`📋 Get orders: http://localhost:${PORT}/api/orders`);
-    console.log(`📝 Create order: http://localhost:${PORT}/api/orders (POST)`);
-    console.log(`🔍 Get order: http://localhost:${PORT}/api/orders/:id`);
-    console.log(`📊 Order stats: http://localhost:${PORT}/api/orders/stats`);
-    console.log(`📈 Order analytics: http://localhost:${PORT}/api/orders/analytics`);
-    console.log(`🔄 Returnable items: http://localhost:${PORT}/api/orders/:orderId/returnable-items`);
-    console.log(`📸 Upload images: http://localhost:${PORT}/api/orders/:orderId/return/images`);
-    console.log(`🔄 Request return: http://localhost:${PORT}/api/orders/:orderId/return`);
-    console.log(`📋 Return details: http://localhost:${PORT}/api/orders/:orderId/return`);
-    console.log(`❌ Cancel return: http://localhost:${PORT}/api/orders/:orderId/return/cancel`);
-    
-    console.log(`\n🔄 === RETURN ROUTES ===`);
-    console.log(`📋 Return reasons: http://localhost:${PORT}/api/returns/reasons`);
-    console.log(`📋 Return policy: http://localhost:${PORT}/api/returns/policy`);
-    console.log(`🔍 Track return: http://localhost:${PORT}/api/returns/track/:returnId`);
-    console.log(`📦 Returnable items: http://localhost:${PORT}/api/returns/order/:orderId/returnable-items`);
-    console.log(`📸 Upload images: http://localhost:${PORT}/api/returns/order/:orderId/images`);
-    console.log(`🔄 Request return: http://localhost:${PORT}/api/returns/order/:orderId/request`);
-    console.log(`📋 Return details: http://localhost:${PORT}/api/returns/order/:orderId/details`);
-    console.log(`❌ Cancel return: http://localhost:${PORT}/api/returns/order/:orderId/cancel`);
-    
-    console.log(`\n👑 === ADMIN RETURN ROUTES ===`);
-    console.log(`📋 All returns: http://localhost:${PORT}/api/returns`);
-    console.log(`🔄 Update status: http://localhost:${PORT}/api/returns/:returnId/status`);
-    console.log(`💰 Process refund: http://localhost:${PORT}/api/returns/:returnId/refund`);
-    console.log(`📅 Schedule pickup: http://localhost:${PORT}/api/returns/:returnId/pickup`);
-    
-    console.log(`\n🛒 === PRODUCT ROUTES ===`);
-    console.log(`📋 Get products: http://localhost:${PORT}/api/products`);
-    console.log(`🔍 Get product: http://localhost:${PORT}/api/products/:id`);
-    console.log(`⭐ Get reviews: http://localhost:${PORT}/api/products/:id/reviews`);
-    
-    console.log(`\n🛍️  === CART ROUTES ===`);
-    console.log(`🛒 Get cart: http://localhost:${PORT}/api/cart`);
-    console.log(`➕ Add to cart: http://localhost:${PORT}/api/cart/add`);
-    console.log(`➖ Update quantity: http://localhost:${PORT}/api/cart/update`);
-    console.log(`❌ Remove item: http://localhost:${PORT}/api/cart/remove/:productId`);
-    console.log(`🗑️ Clear cart: http://localhost:${PORT}/api/cart/clear`);
-    
-    console.log(`\n❤️ === WISHLIST ROUTES ===`);
-    console.log(`❤️ Get wishlist: http://localhost:${PORT}/api/wishlist`);
-    console.log(`➕ Add to wishlist: http://localhost:${PORT}/api/wishlist/add/:productId`);
-    console.log(`❌ Remove from wishlist: http://localhost:${PORT}/api/wishlist/remove/:productId`);
-    console.log(`✅ Check in wishlist: http://localhost:${PORT}/api/wishlist/check/:productId`);
-    
-    console.log(`\n📬 === NEWSLETTER ROUTES ===`);
-    console.log(`📝 Subscribe: http://localhost:${PORT}/api/newsletter/subscribe`);
-    console.log(`✅ Confirm: http://localhost:${PORT}/api/newsletter/confirm/:token`);
-    console.log(`📧 Unsubscribe: http://localhost:${PORT}/api/newsletter/unsubscribe/:token`);
-    console.log(`📋 Get subscribers: http://localhost:${PORT}/api/newsletter/subscribers`);
-    
-    console.log(`\n⭐ === REVIEW ROUTES ===`);
-    console.log(`📋 Get reviews: http://localhost:${PORT}/api/reviews`);
-    console.log(`📝 Create review: http://localhost:${PORT}/api/reviews (POST)`);
-    console.log(`✏️ Update review: http://localhost:${PORT}/api/reviews/:id`);
-    console.log(`🗑️ Delete review: http://localhost:${PORT}/api/reviews/:id`);
-    console.log(`👍 Like review: http://localhost:${PORT}/api/reviews/:id/like`);
-    console.log(`👎 Dislike review: http://localhost:${PORT}/api/reviews/:id/dislike`);
-    
-    console.log(`\n💬 === FEEDBACK ROUTES ===`);
-    console.log(`📝 Submit feedback: http://localhost:${PORT}/api/feedback`);
-    console.log(`⚡ Quick feedback: http://localhost:${PORT}/api/feedback/quick`);
-    console.log(`📋 Get feedback: http://localhost:${PORT}/api/feedback`);
-    console.log(`✅ Update status: http://localhost:${PORT}/api/feedback/:id/status`);
-    
-    console.log(`\n🖼️ === HERO BANNER ROUTES ===`);
-    console.log(`📋 Get all banners: http://localhost:${PORT}/api/hero-banner`);
-    console.log(`🔍 Get active banners: http://localhost:${PORT}/api/hero-banner/active`);
-    console.log(`🔍 Get banner by ID: http://localhost:${PORT}/api/hero-banner/:id`);
-    console.log(`📝 Create banner: http://localhost:${PORT}/api/hero-banner (POST)`);
-    console.log(`✏️ Update banner: http://localhost:${PORT}/api/hero-banner/:id (PUT)`);
-    console.log(`🗑️ Delete banner: http://localhost:${PORT}/api/hero-banner/:id (DELETE)`);
-    
-    console.log(`\n🔔 === NOTIFICATION ROUTES ===`);
-    console.log(`📋 Get notifications: http://localhost:${PORT}/api/notifications`);
-    console.log(`📊 Notification stats: http://localhost:${PORT}/api/notifications/stats`);
-    console.log(`📝 Templates: http://localhost:${PORT}/api/notifications/templates`);
-    console.log(`📨 Send notification: http://localhost:${PORT}/api/notifications/send (POST)`);
-    console.log(`📅 Schedule notification: http://localhost:${PORT}/api/notifications/schedule (POST)`);
-    console.log(`🔍 Get notification: http://localhost:${PORT}/api/notifications/:id`);
-    console.log(`✏️ Update notification: http://localhost:${PORT}/api/notifications/:id (PUT)`);
-    console.log(`❌ Cancel notification: http://localhost:${PORT}/api/notifications/:id/cancel (PUT)`);
-    console.log(`🗑️ Delete notification: http://localhost:${PORT}/api/notifications/:id (DELETE)`);
-    console.log(`📊 Track open: http://localhost:${PORT}/api/notifications/:id/track/open (POST)`);
-    console.log(`🖱️ Track click: http://localhost:${PORT}/api/notifications/:id/track/click (POST)`);
-    
-    console.log(`\n💰 === PAYMENT ROUTES ===`);
-    console.log(`📋 Get payments: http://localhost:${PORT}/api/payments`);
-    console.log(`📊 Payment stats: http://localhost:${PORT}/api/payments/stats`);
-    console.log(`💳 Create order: http://localhost:${PORT}/api/payments/create-order (POST)`);
-    console.log(`✅ Verify payment: http://localhost:${PORT}/api/payments/verify (POST)`);
-    console.log(`🔍 Get payment: http://localhost:${PORT}/api/payments/:id`);
-    console.log(`↩️ Process refund: http://localhost:${PORT}/api/payments/:id/refund (POST)`);
-    console.log(`🔔 Webhook: http://localhost:${PORT}/api/payments/webhook (POST)`);
-    
-    console.log(`\n🚚 === DELIVERY ROUTES ===`);
-    console.log(`📋 Get deliveries: http://localhost:${PORT}/api/orders?status=out-for-delivery`);
-    console.log(`📊 Delivery stats: http://localhost:${PORT}/api/orders/stats`);
-    console.log(`📦 Update delivery status: http://localhost:${PORT}/api/orders/:orderId/status (PUT)`);
-    console.log(`🚚 Out for delivery: http://localhost:${PORT}/api/orders?status=out-for-delivery`);
-    console.log(`✅ Mark delivered: http://localhost:${PORT}/api/orders/:orderId/status (PUT with status=delivered)`);
-    console.log(`📅 Schedule delivery: http://localhost:${PORT}/api/orders/:orderId/schedule (POST)`);
-    console.log(`📍 Track delivery: http://localhost:${PORT}/api/orders/:orderId/track`);
-    
     console.log(`\n🌐 Allowed CORS origins:`);
     allowedOrigins.forEach(origin => console.log(`   - ${origin}`));
+    console.log(`   - *.vercel.app (all Vercel deployments)`);
+    console.log(`   - *.now.sh (legacy Vercel domains)`);
     
     console.log(`\n🚀 Server is ready to handle requests!\n`);
 });
