@@ -1,10 +1,8 @@
 // src/api/api.js
 import axios from 'axios';
 
-// TEMPORARY HARDCODE - Remove after Vercel env works
+// ✅ UPDATED: Using your Render backend URL
 const API_BASE_URL = 'https://occamart.onrender.com/api';
-
-console.log('🔧 API Base URL (HARDCODED):', API_BASE_URL);
 
 // Create axios instance
 const api = axios.create({
