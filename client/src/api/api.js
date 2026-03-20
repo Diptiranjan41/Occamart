@@ -1,12 +1,10 @@
 // src/api/api.js
 import axios from 'axios';
 
-// ✅ FIXED: Environment variable use karo
-const API_BASE_URL = import.meta.env.VITE_API_URL 
-    ? `${import.meta.env.VITE_API_URL}/api`
-    : 'http://localhost:5000/api';
+// TEMPORARY HARDCODE - Remove after Vercel env works
+const API_BASE_URL = 'https://occamart.onrender.com/api';
 
-console.log('🔧 API Base URL:', API_BASE_URL); // Debug ke liye
+console.log('🔧 API Base URL (HARDCODED):', API_BASE_URL);
 
 // Create axios instance
 const api = axios.create({
