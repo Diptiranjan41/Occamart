@@ -63,6 +63,7 @@ if (missingEnvVars.length > 0) {
     missingEnvVars.forEach(envVar => console.error(`   - ${envVar}`));
     console.error('\n⚠️  Please add these variables to your .env file');
     
+    // Don't exit in development, but show warning
     if (process.env.NODE_ENV === 'production') {
         process.exit(1);
     }
@@ -107,7 +108,7 @@ app.use((req, res, next) => {
     next();
 });
 
-// ===== 🔥 ENHANCED CORS CONFIGURATION =====
+// ===== CORS CONFIGURATION =====
 const allowedOrigins = [
     'http://localhost:5173',
     'http://localhost:3000',
@@ -302,7 +303,7 @@ app.get('/api/health', async (req, res) => {
     }
 });
 
-// ===== 🔥 PAYMENT TEST ROUTE =====
+// ===== PAYMENT TEST ROUTE =====
 app.get('/api/payments/test', (req, res) => {
     res.json({
         success: true,
@@ -379,7 +380,7 @@ app.use('/api/feedback', feedbackRoutes);
 app.use('/api/hero-banner', heroRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/notifications', notificationRoutes);
-app.use('/api/payments', paymentRoutes); // ✅ Payment routes
+app.use('/api/payments', paymentRoutes);
 
 // ===== TEST & UTILITY ROUTES =====
 app.get('/api/manual-verify/:email', async (req, res) => {

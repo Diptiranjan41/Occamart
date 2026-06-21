@@ -83,7 +83,6 @@ const Payment = () => {
   useEffect(() => {
     const loadRazorpayScript = async () => {
       try {
-        // Check if script already exists
         if (document.querySelector('script[src="https://checkout.razorpay.com/v1/checkout.js"]')) {
           console.log('✅ Razorpay script already loaded');
           setRazorpayLoaded(true);
@@ -244,7 +243,6 @@ const Payment = () => {
       console.log('🚀 Starting payment process...');
       console.log('📌 Payment Method:', paymentMethod);
       
-      // Create order first
       const order = await createOrder();
       
       if (!order) {
@@ -302,7 +300,6 @@ const Payment = () => {
       console.log('💰 Initializing Razorpay payment...');
       console.log('🔑 Razorpay Key:', razorpayKey);
       
-      // Check if Razorpay is loaded
       if (!window.Razorpay) {
         console.error('❌ Razorpay SDK not loaded');
         showNotification('Razorpay SDK not loaded. Please check your internet connection.', 'error');
@@ -311,7 +308,6 @@ const Payment = () => {
         return;
       }
 
-      // Get Razorpay order ID from backend
       console.log('📦 Creating Razorpay order for order ID:', order._id);
       console.log('💰 Amount:', order.totalPrice);
       
@@ -339,7 +335,6 @@ const Payment = () => {
           console.log('✅ Razorpay payment successful:', response);
           
           try {
-            // Verify payment
             const verifyResponse = await api.post('/payments/verify-razorpay-payment', {
               orderId: order._id,
               razorpayPaymentId: response.razorpay_payment_id,
@@ -350,11 +345,9 @@ const Payment = () => {
             if (verifyResponse.data.success) {
               console.log('✅ Payment verified successfully');
               
-              // Clear cart and address
               await clearCart();
               sessionStorage.removeItem('shippingAddress');
               
-              // ✅ Set order placed state
               setOrderDetails(order);
               setOrderPlaced(true);
               setLoading(false);

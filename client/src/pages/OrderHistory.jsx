@@ -90,7 +90,7 @@ const OrderHistory = () => {
         return () => window.removeEventListener('resize', handleResize);
     }, []);
 
-    // ✅ Check authentication and fetch orders
+    // Check authentication on mount
     useEffect(() => {
         console.log('🔐 Auth State:', { 
             isAuthenticated, 
@@ -343,25 +343,19 @@ const OrderHistory = () => {
         };
     }, []);
 
-    // ✅ Fetch orders using the correct endpoint
+    // Fetch orders and check review status
     const fetchOrders = async () => {
         try {
             setLoading(true);
             setError('');
             
-            console.log('📦 Fetching orders for user...');
+            console.log('📦 Fetching orders with token:', token ? 'Token exists' : 'No token');
             
             if (!token) {
                 throw new Error('No authentication token found');
             }
 
-            const response = await axios.get(`${API_URL}/orders/myorders`, {
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
-                timeout: 10000
-            });
+            const response = await orderAPI.getMyOrders();
             
             console.log('✅ Orders response:', response.data);
 
@@ -374,19 +368,10 @@ const OrderHistory = () => {
                 ordersData = response.data.data;
             }
 
-            console.log('📦 Orders data extracted:', ordersData.length, 'orders');
-
-            if (ordersData.length === 0) {
-                setError('No orders found. Start shopping to see your orders here!');
-                setOrders([]);
-                setLoading(false);
-                return;
-            }
-
             // Fetch reviews to check review status
             const reviewStatus = {};
             
-            if (token && ordersData.length > 0) {
+            if (token) {
                 try {
                     console.log('📝 Fetching user reviews...');
                     
@@ -394,13 +379,11 @@ const OrderHistory = () => {
                         headers: { 
                             Authorization: `Bearer ${token}`,
                             'Content-Type': 'application/json'
-                        },
-                        timeout: 10000
+                        }
                     });
                     
                     if (reviewResponse.data && reviewResponse.data.success) {
-                        const reviews = reviewResponse.data.data || reviewResponse.data.reviews || [];
-                        reviews.forEach(review => {
+                        reviewResponse.data.data.forEach(review => {
                             if (review.product) {
                                 const productId = review.product._id || review.product;
                                 reviewStatus[productId] = true;
@@ -409,7 +392,7 @@ const OrderHistory = () => {
                         console.log('✅ Reviews fetched:', Object.keys(reviewStatus).length);
                     }
                 } catch (err) {
-                    console.log('⚠️ Error fetching reviews:', err.response?.data || err.message);
+                    console.error('❌ Error fetching reviews:', err.response?.data || err.message);
                 }
             }
             
@@ -417,18 +400,16 @@ const OrderHistory = () => {
             const updatedOrders = ordersData.map(order => ({
                 ...order,
                 orderItems: order.orderItems?.map(item => {
-                    const productId = item.product?._id || item.product || item.productId;
+                    const productId = item.product?._id || item.product;
                     return {
                         ...item,
                         productId: productId,
                         isReviewed: reviewStatus[productId] || false
                     };
-                }) || []
+                })
             }));
 
             setOrders(updatedOrders);
-            console.log('✅ Orders set successfully:', updatedOrders.length);
-            
         } catch (error) {
             console.error('❌ Error fetching orders:', {
                 message: error.message,
@@ -436,30 +417,17 @@ const OrderHistory = () => {
                 status: error.response?.status
             });
             
-            if (error.code === 'ECONNABORTED') {
-                setError('Request timed out. Please check your connection and try again.');
-            } else if (error.response?.status === 401) {
+            if (error.response?.status === 401) {
                 setError('Your session has expired. Please login again.');
-                localStorage.removeItem('token');
-                localStorage.removeItem('user');
-                navigate('/login');
-            } else if (error.response?.status === 403) {
-                setError('You don\'t have permission to view these orders. Please login again.');
-                localStorage.removeItem('token');
-                localStorage.removeItem('user');
-                navigate('/login');
-            } else if (error.response?.status === 404) {
-                setError('No orders found. Start shopping to see your orders here!');
-                setOrders([]);
             } else {
-                setError(error.response?.data?.message || error.message || 'Failed to load orders. Please try again.');
+                setError(error.response?.data?.message || 'Failed to load orders');
             }
         } finally {
             setLoading(false);
         }
     };
 
-    // ✅ OPTIMIZED: Only check delivered orders for returns
+    // Fetch return requests for all orders - UPDATED to handle 404 gracefully
     const fetchReturnRequests = async () => {
         try {
             setLoadingReturns(true);
@@ -471,57 +439,46 @@ const OrderHistory = () => {
 
             const requests = {};
             
-            // 🔥 Only check delivered orders (only these can have returns)
-            const deliveredOrders = orders.filter(order => 
-                order.status === 'delivered' || order.isDelivered
-            );
-            
-            if (deliveredOrders.length === 0) {
-                console.log('ℹ️ No delivered orders to check for returns');
-                setLoadingReturns(false);
-                return;
-            }
-            
-            console.log(`📦 Checking ${deliveredOrders.length} delivered orders for returns...`);
-            
-            let foundCount = 0;
-            
-            for (const order of deliveredOrders) {
+            for (const order of orders) {
                 try {
-                    const response = await axios.get(`${API_URL}/orders/${order._id}/return`, {
+                    console.log(`Fetching returns for order ${order._id}`);
+                    
+                    const response = await axios.get(`${API_URL}/returns/order/${order._id}`, {
                         headers: { 
                             Authorization: `Bearer ${token}`,
                             'Content-Type': 'application/json'
                         },
-                        timeout: 10000,
-                        validateStatus: (status) => status < 500
+                        validateStatus: (status) => status < 500 // Don't throw on 404
                     });
                     
+                    // Check if response is successful and has data
                     if (response.status === 200 && response.data && response.data.success) {
-                        const returnData = response.data.returnDetails || response.data.data || response.data;
-                        if (returnData && returnData.returnStatus) {
+                        // Handle different response structures
+                        const returnData = response.data.data || response.data.returns || response.data;
+                        if (returnData && (Array.isArray(returnData) ? returnData.length > 0 : true)) {
                             requests[order._id] = returnData;
-                            foundCount++;
-                            console.log(`✅ Found return for order ${order._id}:`, returnData.returnStatus);
+                            console.log(`Found returns for order ${order._id}:`, returnData);
+                        } else {
+                            console.log(`No returns found for order ${order._id} (empty response)`);
                         }
                     } else if (response.status === 404) {
-                        // This is expected - no return request for this order
-                        console.log(`ℹ️ No return request for order ${order._id}`);
+                        // 404 means no returns - this is normal, not an error
+                        console.log(`No returns found for order ${order._id} (404)`);
                     } else {
-                        console.log(`⚠️ Unexpected response for order ${order._id}:`, response.status);
+                        console.log(`Unexpected response for order ${order._id}:`, response.status);
                     }
                 } catch (err) {
-                    // 404 is expected when no return exists - ignore silently
+                    // Only log non-404 errors
                     if (err.response?.status !== 404) {
-                        console.log(`⚠️ Error checking return for order ${order._id}:`, err.message);
+                        console.log(`Error fetching returns for order ${order._id}:`, err.message);
+                    } else {
+                        console.log(`No returns found for order ${order._id} (404 handled)`);
                     }
                 }
             }
             
             setReturnRequests(requests);
             setReturnFeatureEnabled(true);
-            console.log(`✅ Found ${foundCount} orders with return requests out of ${deliveredOrders.length} delivered orders`);
-            
         } catch (error) {
             console.error('❌ Error in fetchReturnRequests:', error);
             setReturnFeatureEnabled(false);
@@ -649,33 +606,23 @@ const OrderHistory = () => {
             const orderReturns = returnRequests[orderId];
             if (!orderReturns) return null;
             
-            const returnData = orderReturns;
+            // Handle both array and object responses
+            const returnsArray = Array.isArray(orderReturns) ? orderReturns : [orderReturns];
             
-            // Check if this item has a return request
-            if (returnData.returnItems && Array.isArray(returnData.returnItems)) {
-                const itemReturn = returnData.returnItems.find(r => 
-                    r.product?.toString() === itemId?.toString() || 
-                    r.productId?.toString() === itemId?.toString()
-                );
-                if (itemReturn) {
-                    return {
-                        status: returnData.returnStatus || 'pending',
-                        requestDate: returnData.returnRequestedAt || returnData.createdAt,
-                        id: returnData.returnId || returnData._id
-                    };
-                }
-            }
+            const itemReturn = returnsArray.find(r => 
+                r.items && r.items.some(i => {
+                    const productId = i.product?.toString() || i.product;
+                    return productId === itemId?.toString();
+                })
+            );
             
-            // If no specific item match, but return exists for this order
-            if (returnData.returnStatus) {
-                return {
-                    status: returnData.returnStatus || 'pending',
-                    requestDate: returnData.returnRequestedAt || returnData.createdAt,
-                    id: returnData.returnId || returnData._id
-                };
-            }
+            if (!itemReturn) return null;
             
-            return null;
+            return {
+                status: itemReturn.status || 'pending',
+                requestDate: itemReturn.createdAt || itemReturn.requestedAt,
+                id: itemReturn._id || itemReturn.returnId
+            };
         } catch (error) {
             console.error('Error getting return status:', error);
             return null;
@@ -685,10 +632,12 @@ const OrderHistory = () => {
     // Check if item is eligible for return
     const isReturnEligible = (order, item) => {
         try {
+            // Check if order is delivered
             if (order.status !== 'delivered' && !order.isDelivered) {
                 return false;
             }
             
+            // Check if within 7 days of delivery (standard return window)
             const deliveryDate = order.deliveredAt || order.createdAt;
             if (!deliveryDate) return false;
             
@@ -698,6 +647,7 @@ const OrderHistory = () => {
                 return false;
             }
             
+            // Check if already returned
             const returnStatus = getItemReturnStatus(order._id, item.productId || item.product);
             if (returnStatus) {
                 return false;
@@ -1320,12 +1270,12 @@ const OrderHistory = () => {
                                                                 {/* Return Status Badge */}
                                                                 {returnStatus && (
                                                                     <div className={`return-badge ${
-                                                                        returnStatus.status === 'return-approved' || returnStatus.status === 'approved' ? 'return-approved' :
-                                                                        returnStatus.status === 'return-rejected' || returnStatus.status === 'rejected' ? 'return-rejected' :
+                                                                        returnStatus.status === 'approved' ? 'return-approved' :
+                                                                        returnStatus.status === 'rejected' ? 'return-rejected' :
                                                                         'return-pending'
                                                                     }`}>
                                                                         <RefreshCw size={12} />
-                                                                        Return {returnStatus.status.replace('return-', '')}
+                                                                        Return {returnStatus.status}
                                                                         <span className="return-timeline">
                                                                             • {formatDate(returnStatus.requestDate)}
                                                                         </span>
@@ -1462,7 +1412,7 @@ const OrderHistory = () => {
                                             </div>
                                             
                                             <Link
-                                                to={`/order/${order._id}`}
+                                                to={`/orders/${order._id}`}
                                                 className="view-details-btn"
                                                 onClick={() => console.log('🔗 Navigating to order:', order._id)}
                                             >

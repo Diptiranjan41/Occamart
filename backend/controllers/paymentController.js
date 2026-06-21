@@ -37,9 +37,6 @@ try {
 // 🔑 GET RAZORPAY KEY - FRONTEND NEEDS THIS!
 // ====================================================================
 
-// @desc    Get Razorpay key ID for frontend
-// @route   GET /api/payments/key
-// @access  Public
 const getRazorpayKey = async (req, res) => {
     try {
         const keyId = process.env.RAZORPAY_KEY_ID;
@@ -68,15 +65,11 @@ const getRazorpayKey = async (req, res) => {
 // 🔥 FRONTEND INTEGRATION FUNCTIONS
 // ====================================================================
 
-// @desc    Create Razorpay order (Frontend expects this exact endpoint)
-// @route   POST /api/payments/create-razorpay-order
-// @access  Private
 const createRazorpayOrder = async (req, res) => {
     try {
         console.log('💰 Creating Razorpay order via /create-razorpay-order');
         console.log('📦 Request body:', req.body);
         
-        // Check if Razorpay is initialized
         if (!razorpay) {
             console.error('❌ Razorpay not initialized');
             return res.status(503).json({
@@ -103,7 +96,6 @@ const createRazorpayOrder = async (req, res) => {
             });
         }
 
-        // Find the order
         const order = await Order.findById(orderId).populate('user', 'name email phone');
         
         if (!order) {
@@ -118,9 +110,8 @@ const createRazorpayOrder = async (req, res) => {
         console.log('💰 Amount:', amount);
         console.log('👤 User:', order.user?.email);
 
-        // Create Razorpay order options
         const options = {
-            amount: Math.round(amount * 100), // Convert to paise
+            amount: Math.round(amount * 100),
             currency: 'INR',
             receipt: orderId,
             payment_capture: 1,
@@ -134,12 +125,10 @@ const createRazorpayOrder = async (req, res) => {
 
         console.log('📦 Razorpay options:', options);
 
-        // Create Razorpay order
         const razorpayOrder = await razorpay.orders.create(options);
         
         console.log('✅ Razorpay order created:', razorpayOrder.id);
 
-        // ✅ FIXED: Save payment record with all required fields
         const payment = new Payment({
             razorpayOrderId: razorpayOrder.id,
             amount: razorpayOrder.amount / 100,
@@ -147,7 +136,7 @@ const createRazorpayOrder = async (req, res) => {
             status: 'created',
             customerName: order.user?.name || 'Customer',
             customerEmail: order.user?.email || '',
-            customerPhone: order.user?.phone || req.user?.phone || '9999999999', // ✅ Provide default if missing
+            customerPhone: order.user?.phone || req.user?.phone || '9999999999',
             orderId: orderId,
             userId: req.user?._id,
             notes: options.notes
@@ -156,7 +145,6 @@ const createRazorpayOrder = async (req, res) => {
         await payment.save();
         console.log('✅ Payment record saved');
 
-        // Send response
         res.json({
             success: true,
             razorpayOrderId: razorpayOrder.id,
@@ -169,7 +157,6 @@ const createRazorpayOrder = async (req, res) => {
         console.error('❌ Razorpay order creation error:', error);
         console.error('📚 Error stack:', error.stack);
         
-        // Send detailed error response
         res.status(500).json({
             success: false,
             message: error.message || 'Failed to create Razorpay order',
@@ -182,9 +169,6 @@ const createRazorpayOrder = async (req, res) => {
     }
 };
 
-// @desc    Verify Razorpay payment (Frontend expects this exact endpoint)
-// @route   POST /api/payments/verify-razorpay-payment
-// @access  Private
 const verifyRazorpayPayment = async (req, res) => {
     try {
         console.log('🔐 Verifying Razorpay payment via /verify-razorpay-payment');
@@ -232,7 +216,6 @@ const verifyRazorpayPayment = async (req, res) => {
             console.log('✅ Order found, updating payment status...');
             console.log('   Current isPaid:', order.isPaid);
 
-            // ✅ Update order payment status
             order.isPaid = true;
             order.paidAt = Date.now();
             order.paymentResult = {
@@ -250,7 +233,6 @@ const verifyRazorpayPayment = async (req, res) => {
             console.log('   Status:', order.status);
             console.log('   Payment ID:', razorpayPaymentId);
 
-            // ✅ Update or create payment record
             await Payment.findOneAndUpdate(
                 { razorpayOrderId: razorpayOrderId },
                 {
@@ -302,12 +284,9 @@ const verifyRazorpayPayment = async (req, res) => {
 };
 
 // ====================================================================
-// EXISTING FUNCTIONS
+// LEGACY FUNCTIONS
 // ====================================================================
 
-// @desc    Create Razorpay order (legacy)
-// @route   POST /api/payments/create-order
-// @access  Public
 const createOrder = async (req, res) => {
     try {
         if (!razorpay) {
@@ -396,9 +375,6 @@ const createOrder = async (req, res) => {
     }
 };
 
-// @desc    Verify payment (legacy)
-// @route   POST /api/payments/verify
-// @access  Public
 const verifyPayment = async (req, res) => {
     try {
         if (!razorpay) {
@@ -520,9 +496,6 @@ const verifyPayment = async (req, res) => {
 // ADMIN FUNCTIONS
 // ====================================================================
 
-// @desc    Get payment by ID
-// @route   GET /api/payments/:id
-// @access  Private
 const getPaymentById = async (req, res) => {
     try {
         const payment = await Payment.findById(req.params.id)
@@ -557,9 +530,6 @@ const getPaymentById = async (req, res) => {
     }
 };
 
-// @desc    Get payment by Razorpay order ID
-// @route   GET /api/payments/order/:razorpayOrderId
-// @access  Private
 const getPaymentByRazorpayOrderId = async (req, res) => {
     try {
         const payment = await Payment.findOne({ 
@@ -587,9 +557,6 @@ const getPaymentByRazorpayOrderId = async (req, res) => {
     }
 };
 
-// @desc    Get all payments (admin only)
-// @route   GET /api/payments
-// @access  Private/Admin
 const getAllPayments = async (req, res) => {
     try {
         const { 
@@ -660,9 +627,6 @@ const getAllPayments = async (req, res) => {
     }
 };
 
-// @desc    Get payment statistics (admin only)
-// @route   GET /api/payments/stats
-// @access  Private/Admin
 const getPaymentStats = async (req, res) => {
     try {
         const today = new Date();
@@ -717,9 +681,6 @@ const getPaymentStats = async (req, res) => {
     }
 };
 
-// @desc    Process refund
-// @route   POST /api/payments/:id/refund
-// @access  Private/Admin
 const processRefund = async (req, res) => {
     try {
         if (!razorpay) {
@@ -819,9 +780,6 @@ const processRefund = async (req, res) => {
     }
 };
 
-// @desc    Razorpay webhook handler
-// @route   POST /api/payments/webhook
-// @access  Public
 const handleWebhook = async (req, res) => {
     try {
         const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
@@ -980,7 +938,7 @@ async function handleRefundFailed(payload) {
 }
 
 // ====================================================================
-// 📤 EXPORT ALL FUNCTIONS - SINGLE EXPORT
+// 📤 EXPORT ALL FUNCTIONS - SINGLE EXPORT BLOCK
 // ====================================================================
 
 export {

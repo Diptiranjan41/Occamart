@@ -2,7 +2,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { orderAPI } from '../api/api';
-import { useAuth } from '../components/context/AuthContext';
 import { 
     Package, 
     Calendar, 
@@ -42,7 +41,6 @@ import {
 const OrderDetails = () => {
     const { id } = useParams();
     const navigate = useNavigate();
-    const { token, isAuthenticated } = useAuth();
     const [order, setOrder] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -94,15 +92,11 @@ const OrderDetails = () => {
     }, []);
 
     useEffect(() => {
-        if (!isAuthenticated || !token) {
-            navigate('/login');
-            return;
-        }
         if (fetchInFlightRef.current && lastFetchedIdRef.current === id) {
             return;
         }
         fetchOrderDetails();
-    }, [id, isAuthenticated, token]);
+    }, [id]);
 
     // Add CSS animations
     useEffect(() => {
@@ -605,6 +599,13 @@ const OrderDetails = () => {
                 color: colors.warning,
                 className: 'status-pending'
             };
+        } else if (order.isPaid) {
+            return { 
+                text: 'Paid', 
+                icon: CheckCircle,
+                color: colors.success,
+                className: 'status-delivered'
+            };
         } else {
             return { 
                 text: 'Pending', 
@@ -615,21 +616,17 @@ const OrderDetails = () => {
         }
     };
 
-    // ✅ FIXED: Check payment status properly
     const getPaymentStatus = (order) => {
         if (!order) return { text: 'Pending', icon: Clock, color: colors.warning };
         
-        // Check if order is cancelled
         if (order.status === 'cancelled') {
             return { text: 'Cancelled', icon: XCircle, color: colors.cancelled };
         }
         
-        // Check if payment is successful
         if (order.isPaid === true || order.paymentResult?.status === 'completed' || order.paymentResult?.id) {
             return { text: 'Successful', icon: CheckCircle, color: colors.success };
         }
         
-        // Check if payment is pending
         if (order.isPaid === false || order.isPaid === undefined) {
             return { text: 'Pending', icon: Clock, color: colors.warning };
         }
@@ -1591,7 +1588,7 @@ const OrderDetails = () => {
                                 </div>
                             </div>
 
-                            {/* ✅ FIXED: Payment Method with correct status */}
+                            {/* Payment Method - FIXED */}
                             <div className="info-card">
                                 <h4 style={{
                                     fontSize: '1.1rem',
@@ -1610,7 +1607,7 @@ const OrderDetails = () => {
                                         {order.paymentMethod || 'Razorpay'}
                                     </p>
                                     
-                                    {/* ✅ FIXED: Payment status display */}
+                                    {/* Payment status display */}
                                     {order.status === 'cancelled' ? (
                                         <div style={{
                                             background: `${colors.cancelled}10`,

@@ -24,7 +24,6 @@ const getBaseURL = () => {
     }
     
     // 3. Development - auto-detect localhost
-    // ✅ FIXED: Changed from 3000 to 5000
     const port = 5000; // Your backend port
     const hostname = window.location.hostname;
     

@@ -190,7 +190,6 @@ const Returns = () => {
     }
   };
 
-  // ✅ FIXED: Use correct endpoint /api/orders/:orderId/return
   const fetchUserReturns = async () => {
     try {
       setLoading(true);
@@ -206,7 +205,6 @@ const Returns = () => {
 
       for (const order of ordersData) {
         try {
-          // ✅ CORRECT: /api/orders/:orderId/return
           const returnResponse = await axios.get(`${API_URL}/orders/${order._id}/return`, {
             headers: { Authorization: `Bearer ${token}` }
           });
@@ -244,7 +242,6 @@ const Returns = () => {
     }
   };
 
-  // ✅ FIXED: Use correct endpoint
   const fetchUserOrders = async () => {
     try {
       const token = localStorage.getItem('token');
@@ -264,11 +261,9 @@ const Returns = () => {
     }
   };
 
-  // ✅ FIXED: Use correct endpoint /api/orders/:orderId/returnable-items
   const fetchReturnableItems = async (orderId) => {
     try {
       const token = localStorage.getItem('token');
-      // ✅ CORRECT: /api/orders/:orderId/returnable-items
       const response = await axios.get(`${API_URL}/orders/${orderId}/returnable-items`, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -297,11 +292,9 @@ const Returns = () => {
     }
   };
 
-  // ✅ FIXED: Use correct endpoint /api/orders/:returnId/return
   const handleTrackReturn = async (returnId) => {
     try {
       const token = localStorage.getItem('token');
-      // ✅ CORRECT: /api/orders/:returnId/return
       const response = await axios.get(`${API_URL}/orders/${returnId}/return`, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -321,7 +314,6 @@ const Returns = () => {
     }
   };
 
-  // ✅ ADDED: Handle cancel return
   const handleCancelReturn = async (returnId) => {
     if (!window.confirm('Are you sure you want to cancel this return request?')) {
       return;
@@ -329,7 +321,6 @@ const Returns = () => {
 
     try {
       const token = localStorage.getItem('token');
-      // ✅ CORRECT: /api/orders/:returnId/return/cancel
       const response = await axios.post(
         `${API_URL}/orders/${returnId}/return/cancel`,
         {},
@@ -404,7 +395,6 @@ const Returns = () => {
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  // ✅ FIXED: Use correct endpoint /api/orders/:orderId/return
   const handleSubmitReturn = async (e) => {
     e.preventDefault();
     
@@ -451,7 +441,6 @@ const Returns = () => {
         returnType: 'refund'
       };
 
-      // ✅ CORRECT ENDPOINT: /api/orders/:orderId/return
       const response = await axios.post(
         `${API_URL}/orders/${formData.orderId}/return`,
         returnData,
@@ -567,7 +556,6 @@ const Returns = () => {
     );
   };
 
-  // Styles
   const styles = {
     container: {
       minHeight: '100vh',

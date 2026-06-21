@@ -274,9 +274,17 @@ const Cart = () => {
     }, 0);
   };
 
-  // ✅ REMOVED: Shipping progress calculation
-  // const calculateShippingProgress = () => { ... }
-  // const getRemainingForFreeShipping = () => { ... }
+  const calculateShippingProgress = () => {
+    const subtotal = calculateSubtotal();
+    const freeShippingThreshold = 5000;
+    return Math.min((subtotal / freeShippingThreshold) * 100, 100);
+  };
+
+  const getRemainingForFreeShipping = () => {
+    const subtotal = calculateSubtotal();
+    const freeShippingThreshold = 5000;
+    return Math.max(freeShippingThreshold - subtotal, 0).toFixed(2);
+  };
 
   const getImageUrl = (item) => {
     if (item.image) {
@@ -525,7 +533,6 @@ const Cart = () => {
                 <ShoppingCart size={14} />
                 Cart: {cartCount}
               </span>
-              {/* ✅ Free Shipping Badge */}
               <span style={{
                 background: colors.success,
                 padding: '4px 12px',
@@ -565,7 +572,7 @@ const Cart = () => {
           </button>
         </div>
 
-        {/* ✅ Free Shipping Banner */}
+        {/* Free Shipping Banner */}
         <div style={{
           background: `${colors.success}15`,
           border: `1px solid ${colors.success}`,
@@ -844,7 +851,6 @@ const Cart = () => {
               </div>
             )}
 
-            {/* ✅ Updated: Shipping - Always FREE */}
             <div style={{
               display: 'flex',
               justifyContent: 'space-between',
@@ -900,7 +906,7 @@ const Cart = () => {
               Proceed to Checkout
             </button>
 
-            {/* ✅ Updated Features */}
+            {/* Features */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {[
                 { icon: Shield, text: 'Secure Checkout' },
