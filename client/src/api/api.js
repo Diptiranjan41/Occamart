@@ -11,14 +11,14 @@ const isProduction = import.meta.env?.MODE === 'production' ||
 
 // Get backend URL from environment or auto-detect
 const getBaseURL = () => {
-    // 1. Check environment variable first
+    // 1. Check environment variable first (Vercel/Render)
     if (import.meta.env?.VITE_API_URL) {
         console.log('📡 Using API from VITE_API_URL:', import.meta.env.VITE_API_URL);
         return import.meta.env.VITE_API_URL;
     }
     
-    // 2. Check if we're in production (Render)
-    if (isProduction) {
+    // 2. Check if we're in production (Vercel)
+    if (isProduction || window.location.hostname.includes('vercel.app')) {
         console.log('📡 Production mode - using Render backend');
         return 'https://occamart.onrender.com/api';
     }
