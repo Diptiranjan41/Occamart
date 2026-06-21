@@ -115,7 +115,7 @@ const AppContent = () => {
           {/* ===== 🔥 FIXED PAYMENT ROUTES ===== */}
           
           {/* Public payment route - No authentication required */}
-          <Route path="/payment" element={<Payment />} />
+         <Route path="/checkout/payment" element={<Payment />} />
           
           {/* 🔥 FIXED: Protected payment route - CORRECT PATH */}
           <Route
