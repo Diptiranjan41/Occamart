@@ -1,0 +1,313 @@
+// Yeh data aap MongoDB me directly insert kar sakte ho
+const featuredProducts = [
+  // Electronics Category (4 products)
+  {
+    name: "MacBook Pro 16" M3",
+    description: "Latest MacBook Pro with M3 chip, 16-inch Liquid Retina XDR display, 32GB RAM, 1TB SSD. Perfect for professionals and creators.",
+    price: 249999,
+    originalPrice: 289999,
+    discount: "14% OFF",
+    category: "electronics",
+    subcategory: "laptops",
+    brand: "Apple",
+    images: ["https://images.unsplash.com/photo-1517336714731-489689fd1ca8?w=500"],
+    rating: 4.9,
+    reviews: 345,
+    inStock: true,
+    quantity: 25,
+    sold: 120,
+    featured: true,
+    trending: true,
+    tags: ["laptop", "macbook", "apple", "premium"],
+    specifications: {
+      processor: "Apple M3 Pro",
+      ram: "32GB",
+      storage: "1TB SSD",
+      display: "16-inch Liquid Retina XDR",
+      battery: "Up to 22 hours"
+    }
+  },
+  {
+    name: "Sony WH-1000XM5 Headphones",
+    description: "Industry-leading noise cancellation, exceptional sound quality, and up to 30 hours of battery life.",
+    price: 29990,
+    originalPrice: 34990,
+    discount: "14% OFF",
+    category: "electronics",
+    subcategory: "audio",
+    brand: "Sony",
+    images: ["https://images.unsplash.com/photo-1618366712010-f4ae9c647dcb?w=500"],
+    rating: 4.8,
+    reviews: 892,
+    inStock: true,
+    quantity: 150,
+    sold: 450,
+    featured: true,
+    trending: true,
+    tags: ["headphones", "audio", "sony", "wireless"],
+    specifications: {
+      type: "Over-ear",
+      battery: "30 hours",
+      noiseCancelling: "Yes",
+      bluetooth: "5.2"
+    }
+  },
+  {
+    name: "Samsung 65" 4K QLED TV",
+    description: "Quantum Dot technology, 100% color volume, ultra-thin design with Object Tracking Sound.",
+    price: 134999,
+    originalPrice: 189999,
+    discount: "29% OFF",
+    category: "electronics",
+    subcategory: "televisions",
+    brand: "Samsung",
+    images: ["https://images.unsplash.com/photo-1593784991095-a205069470b6?w=500"],
+    rating: 4.7,
+    reviews: 234,
+    inStock: true,
+    quantity: 30,
+    sold: 85,
+    featured: true,
+    trending: false,
+    tags: ["tv", "samsung", "4k", "qled"],
+    specifications: {
+      display: "65-inch QLED",
+      resolution: "4K Ultra HD",
+      smartTV: "Yes",
+      hdmi: "4 ports"
+    }
+  },
+  {
+    name: "iPad Pro 12.9" M2",
+    description: "M2 chip, Liquid Retina XDR display, 5G capable, perfect for creative professionals.",
+    price: 119900,
+    originalPrice: 139900,
+    discount: "14% OFF",
+    category: "electronics",
+    subcategory: "tablets",
+    brand: "Apple",
+    images: ["https://images.unsplash.com/photo-1544244011-0cc0e5623e0a?w=500"],
+    rating: 4.9,
+    reviews: 567,
+    inStock: true,
+    quantity: 45,
+    sold: 210,
+    featured: true,
+    trending: true,
+    tags: ["ipad", "apple", "tablet", "pro"],
+    specifications: {
+      processor: "Apple M2",
+      display: "12.9-inch Liquid Retina XDR",
+      storage: "256GB",
+      cellular: "5G"
+    }
+  },
+
+  // Fashion Category (3 products)
+  {
+    name: "Designer Leather Jacket",
+    description: "Premium genuine leather jacket, handcrafted, with soft inner lining and multiple pockets.",
+    price: 12999,
+    originalPrice: 24999,
+    discount: "48% OFF",
+    category: "fashion",
+    subcategory: "outerwear",
+    brand: "Fashionista",
+    images: ["https://images.unsplash.com/photo-1551028719-00167b16eac5?w=500"],
+    rating: 4.7,
+    reviews: 128,
+    inStock: true,
+    quantity: 50,
+    sold: 175,
+    featured: true,
+    trending: true,
+    tags: ["jacket", "leather", "designer", "men"],
+    specifications: {
+      material: "Genuine Leather",
+      color: "Black",
+      sizes: "S, M, L, XL",
+      care: "Dry clean only"
+    }
+  },
+  {
+    name: "Premium Silk Saree",
+    description: "Handwoven Banarasi silk saree with gold zari work, pure silk, wedding collection.",
+    price: 24999,
+    originalPrice: 35999,
+    discount: "30% OFF",
+    category: "fashion",
+    subcategory: "ethnic",
+    brand: "Luxury Weaves",
+    images: ["https://images.unsplash.com/photo-1610030469983-98e550d6193c?w=500"],
+    rating: 4.9,
+    reviews: 89,
+    inStock: true,
+    quantity: 20,
+    sold: 65,
+    featured: true,
+    trending: true,
+    tags: ["saree", "silk", "banarasi", "wedding"],
+    specifications: {
+      material: "Pure Silk",
+      length: "6.3 meters",
+      blouse: "Included",
+      work: "Gold Zari"
+    }
+  },
+  {
+    name: "Men's Formal Shoes",
+    description: "Handcrafted leather formal shoes, comfortable fit, durable sole, perfect for office.",
+    price: 4999,
+    originalPrice: 8999,
+    discount: "44% OFF",
+    category: "fashion",
+    subcategory: "footwear",
+    brand: "StepLux",
+    images: ["https://images.unsplash.com/photo-1614252369475-531eba835eb1?w=500"],
+    rating: 4.6,
+    reviews: 234,
+    inStock: true,
+    quantity: 200,
+    sold: 450,
+    featured: true,
+    trending: false,
+    tags: ["shoes", "formal", "leather", "men"],
+    specifications: {
+      material: "Leather",
+      sole: "Rubber",
+      closure: "Lace-up",
+      sizes: "7-12"
+    }
+  },
+
+  // Home & Living Category (3 products)
+  {
+    name: "Smart Home Security Camera",
+    description: "360° coverage, night vision, two-way audio, motion detection, works with Alexa.",
+    price: 4999,
+    originalPrice: 7999,
+    discount: "37% OFF",
+    category: "home",
+    subcategory: "security",
+    brand: "HomeSmart",
+    images: ["https://images.unsplash.com/photo-1558001373-7b93ee48ffa0?w=500"],
+    rating: 4.5,
+    reviews: 445,
+    inStock: true,
+    quantity: 300,
+    sold: 890,
+    featured: true,
+    trending: true,
+    tags: ["camera", "security", "smart home", "wifi"],
+    specifications: {
+      resolution: "2K",
+      nightVision: "Yes",
+      audio: "Two-way",
+      storage: "Cloud + SD"
+    }
+  },
+  {
+    name: "Ergonomic Office Chair",
+    description: "High-back mesh chair with lumbar support, adjustable armrests, headrest, and recline function.",
+    price: 14999,
+    originalPrice: 24999,
+    discount: "40% OFF",
+    category: "home",
+    subcategory: "furniture",
+    brand: "ComfortPlus",
+    images: ["https://images.unsplash.com/photo-1580480055273-228ff5388ef8?w=500"],
+    rating: 4.8,
+    reviews: 312,
+    inStock: true,
+    quantity: 75,
+    sold: 234,
+    featured: true,
+    trending: true,
+    tags: ["chair", "office", "ergonomic", "furniture"],
+    specifications: {
+      material: "Mesh",
+      weight: "25kg",
+      recline: "135°",
+      warranty: "3 years"
+    }
+  },
+  {
+    name: "Air Purifier with HEPA Filter",
+    description: "Covers 500 sq ft, true HEPA filter, removes 99.97% pollutants, quiet operation.",
+    price: 18999,
+    originalPrice: 24999,
+    discount: "24% OFF",
+    category: "home",
+    subcategory: "appliances",
+    brand: "PureAir",
+    images: ["https://images.unsplash.com/photo-1585771724684-38269d6639fd?w=500"],
+    rating: 4.7,
+    reviews: 167,
+    inStock: true,
+    quantity: 60,
+    sold: 145,
+    featured: true,
+    trending: false,
+    tags: ["air purifier", "hepa", "home appliance"],
+    specifications: {
+      coverage: "500 sq ft",
+      filter: "True HEPA",
+      noise: "25dB",
+      power: "50W"
+    }
+  },
+
+  // Beauty Category (2 products)
+  {
+    name: "Premium Skincare Set",
+    description: "Complete skincare routine with cleanser, toner, serum, moisturizer, and sunscreen.",
+    price: 5499,
+    originalPrice: 8999,
+    discount: "39% OFF",
+    category: "beauty",
+    subcategory: "skincare",
+    brand: "Glow & Co",
+    images: ["https://images.unsplash.com/photo-1556229010-aa3f7ff66b24?w=500"],
+    rating: 4.8,
+    reviews: 456,
+    inStock: true,
+    quantity: 200,
+    sold: 678,
+    featured: true,
+    trending: true,
+    tags: ["skincare", "beauty", "set", "premium"],
+    specifications: {
+      type: "5-piece set",
+      skinType: "All",
+      ingredients: "Natural",
+      freeFrom: "Parabens"
+    }
+  },
+  {
+    name: "Professional Hair Dryer",
+    description: "Ionic technology, fast drying, multiple heat settings, cool shot button, lightweight.",
+    price: 3999,
+    originalPrice: 6999,
+    discount: "43% OFF",
+    category: "beauty",
+    subcategory: "hair care",
+    brand: "StylePro",
+    images: ["https://images.unsplash.com/photo-1522338242992-e1a54906a8da?w=500"],
+    rating: 4.6,
+    reviews: 289,
+    inStock: true,
+    quantity: 150,
+    sold: 345,
+    featured: true,
+    trending: false,
+    tags: ["hair dryer", "beauty", "styling"],
+    specifications: {
+      power: "2000W",
+      speed: "3 settings",
+      heat: "3 levels",
+      ionic: "Yes"
+    }
+  }
+];
+
+module.exports = featuredProducts;
