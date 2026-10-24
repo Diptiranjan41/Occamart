@@ -1,10 +1,53 @@
 import Product from '../models/Product.js';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import cloudinary from '../config/cloudinary.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// ============================================================
+// HELPERS
+// ============================================================
+
+const escapeRegex = (str = '') => String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const toBool = (v) => v === true || v === 'true';
+
+// Cloudinary URL se public_id nikalta hai
+// https://res.cloudinary.com/xxx/image/upload/v123/occamart/products/abc.jpg -> occamart/products/abc
+const getPublicId = (url) => {
+  if (typeof url !== 'string' || !url.includes('res.cloudinary.com')) return null;
+  const match = url.match(/\/upload\/(?:v\d+\/)?(.+)\.[a-z0-9]+$/i);
+  return match ? match[1] : null;
+};
+
+// Cloudinary se images delete karta hai (purani /uploads wali images ignore hoti hain)
+const deleteCloudImages = async (urls = []) => {
+  for (const url of urls) {
+    const publicId = getPublicId(url);
+    if (!publicId) continue;
+    try {
+      await cloudinary.uploader.destroy(publicId);
+      console.log('🗑️ Deleted cloud image:', publicId);
+    } catch (err) {
+      console.error('⚠️ Cloudinary delete failed:', publicId, err.message);
+    }
+  }
+};
+
+// Upload middleware ke baad file.path mein permanent https URL hota hai
+const getUploadedUrls = (files = []) => files.map((f) => f.path).filter(Boolean);
+
+const parseFeatures = (raw) => {
+  if (!raw) return null;
+  if (Array.isArray(raw)) return raw.filter(Boolean);
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+  } catch (e) {
+    return String(raw).split(',').map((f) => f.trim()).filter(Boolean);
+  }
+};
+
+// ============================================================
+// PUBLIC ROUTES
+// ============================================================
 
 // @desc    Get all products
 // @route   GET /api/products
@@ -13,42 +56,23 @@ export const getProducts = async (req, res) => {
   try {
     const pageSize = Number(req.query.limit) || 10;
     const page = Number(req.query.pageNumber) || 1;
-    const isFeatured = req.query.isFeatured === 'true';
-    const isTrending = req.query.isTrending === 'true';
-    const isDeal = req.query.isDeal === 'true';
     const category = req.query.category;
     const sort = req.query.sort || 'createdAt';
 
-    // Build filter
-    let filter = { isActive: true };
-    
-    // 🔥 FIXED: Handle featured filter properly
-    if (req.query.isFeatured === 'true') {
-      filter.isFeatured = true;
-    }
-    
-    if (req.query.isTrending === 'true') {
-      filter.isTrending = true;
-    }
-    
-    if (req.query.isDeal === 'true') {
-      filter.isDeal = true;
-    }
+    const filter = { isActive: true };
 
-    // Category filter
+    if (req.query.isFeatured === 'true') filter.isFeatured = true;
+    if (req.query.isTrending === 'true') filter.isTrending = true;
+    if (req.query.isDeal === 'true') filter.isDeal = true;
+
     if (category && category !== 'all' && category !== 'undefined') {
       filter.category = category;
     }
 
-    // Search keyword
     if (req.query.keyword) {
-      filter.name = {
-        $regex: req.query.keyword,
-        $options: 'i',
-      };
+      filter.name = { $regex: escapeRegex(req.query.keyword), $options: 'i' };
     }
 
-    // Build sort
     let sortOption = {};
     switch (sort) {
       case 'price-low':
@@ -60,12 +84,10 @@ export const getProducts = async (req, res) => {
       case 'rating':
         sortOption = { rating: -1 };
         break;
-      case 'newest':
-        sortOption = { createdAt: -1 };
-        break;
       case 'featured':
         sortOption = { isFeatured: -1, createdAt: -1 };
         break;
+      case 'newest':
       default:
         sortOption = { createdAt: -1 };
     }
@@ -75,8 +97,6 @@ export const getProducts = async (req, res) => {
       .sort(sortOption)
       .limit(pageSize)
       .skip(pageSize * (page - 1));
-
-    console.log(`📦 Found ${products.length} products (Page ${page} of ${Math.ceil(count / pageSize)})`);
 
     res.json({
       success: true,
@@ -88,10 +108,7 @@ export const getProducts = async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Get products error:', error);
-    res.status(500).json({ 
-      success: false,
-      message: error.message 
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -106,20 +123,14 @@ export const getFeaturedProducts = async (req, res) => {
     const category = req.query.category;
     const sort = req.query.sort || 'featured';
 
-    // 🔥 FIXED: Use isFeatured field consistently
-    let filter = { isFeatured: true, isActive: true };
-    
-    // Add category filter if provided and not 'all'
+    const filter = { isFeatured: true, isActive: true };
+
     if (category && category !== 'all' && category !== 'undefined') {
       filter.category = category;
     }
 
-    // Build sort options
     let sortOption = {};
     switch (sort) {
-      case 'newest':
-        sortOption = { createdAt: -1 };
-        break;
       case 'price-low':
         sortOption = { price: 1 };
         break;
@@ -129,51 +140,19 @@ export const getFeaturedProducts = async (req, res) => {
       case 'rating':
         sortOption = { rating: -1 };
         break;
+      case 'newest':
       case 'featured':
       default:
         sortOption = { createdAt: -1 };
         break;
     }
 
-    // Get total count for pagination
     const total = await Product.countDocuments(filter);
-
-    // Fetch products with filter, sort, and pagination
     const products = await Product.find(filter)
       .sort(sortOption)
       .skip(skip)
       .limit(limit)
       .select('-__v');
-
-    console.log(`📦 Found ${products.length} featured products (Page ${page} of ${Math.ceil(total / limit)})`);
-
-    // 🔥 DEBUG: Log first product to check fields
-    if (products.length > 0) {
-      console.log('✅ Sample featured product:', {
-        id: products[0]._id,
-        name: products[0].name,
-        isFeatured: products[0].isFeatured,
-        featured: products[0].featured
-      });
-    } else {
-      console.log('⚠️ No featured products found. Checking database...');
-      
-      // Check if any products exist at all
-      const totalProducts = await Product.countDocuments();
-      console.log(`📊 Total products in database: ${totalProducts}`);
-      
-      // Check products with isFeatured=true
-      const featuredCount = await Product.countDocuments({ isFeatured: true });
-      console.log(`📊 Products with isFeatured=true: ${featuredCount}`);
-      
-      // Check products with featured=true (old field)
-      const oldFeaturedCount = await Product.countDocuments({ featured: true });
-      console.log(`📊 Products with featured=true (old): ${oldFeaturedCount}`);
-      
-      // Show some sample products
-      const sampleProducts = await Product.find({}).limit(3).select('name isFeatured featured');
-      console.log('📋 Sample products:', sampleProducts);
-    }
 
     res.json({
       success: true,
@@ -185,10 +164,7 @@ export const getFeaturedProducts = async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Get featured products error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -199,74 +175,39 @@ export const getTrendingProducts = async (req, res) => {
   try {
     const { limit = 8 } = req.query;
 
-    // 🔥 FIXED: Use isTrending field consistently
-    const products = await Product.find({ 
-      isTrending: true,
-      isActive: true 
-    })
+    const products = await Product.find({ isTrending: true, isActive: true })
       .limit(parseInt(limit))
       .sort({ views: -1, rating: -1 });
 
-    console.log(`📦 Found ${products.length} trending products`);
-
-    res.json({
-      success: true,
-      products
-    });
+    res.json({ success: true, products });
   } catch (error) {
     console.error('❌ Get trending products error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// 🔥 NEW: Get category counts for all products
 // @desc    Get category counts for all products
 // @route   GET /api/products/category-counts
 // @access  Public
 export const getCategoryCounts = async (req, res) => {
   try {
-    console.log('📊 Fetching category counts...');
-    
-    // Aggregate to get counts per category
     const categoryCounts = await Product.aggregate([
       { $match: { isActive: true } },
-      {
-        $group: {
-          _id: '$category',
-          count: { $sum: 1 }
-        }
-      },
-      {
-        $sort: { count: -1 }
-      }
+      { $group: { _id: '$category', count: { $sum: 1 } } },
+      { $sort: { count: -1 } }
     ]);
 
-    // Convert to object format
     const counts = {};
-    categoryCounts.forEach(item => {
+    categoryCounts.forEach((item) => {
       counts[item._id] = item.count;
     });
 
-    // Also get total products count
     const totalProducts = await Product.countDocuments({ isActive: true });
 
-    console.log('✅ Category counts:', counts);
-    console.log('📦 Total active products:', totalProducts);
-
-    res.json({
-      success: true,
-      data: counts,
-      total: totalProducts
-    });
+    res.json({ success: true, data: counts, total: totalProducts });
   } catch (error) {
     console.error('❌ Error getting category counts:', error);
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -275,28 +216,21 @@ export const getCategoryCounts = async (req, res) => {
 // @access  Public
 export const getProductById = async (req, res) => {
   try {
-    const product = await Product.findById(req.params.id);
-    if (product) {
-      // Increment view count
-      product.views = (product.views || 0) + 1;
-      await product.save();
-      
-      res.json({
-        success: true,
-        product
-      });
-    } else {
-      res.status(404).json({ 
-        success: false,
-        message: 'Product not found' 
-      });
+    // $inc se view count atomically badhta hai (save() se race condition hoti hai)
+    const product = await Product.findByIdAndUpdate(
+      req.params.id,
+      { $inc: { views: 1 } },
+      { new: true }
+    );
+
+    if (!product) {
+      return res.status(404).json({ success: false, message: 'Product not found' });
     }
+
+    res.json({ success: true, product });
   } catch (error) {
     console.error('❌ Get product by ID error:', error);
-    res.status(500).json({ 
-      success: false,
-      message: error.message 
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -308,23 +242,14 @@ export const getProductsByCategory = async (req, res) => {
     const { category } = req.params;
     const { limit = 10 } = req.query;
 
-    const products = await Product.find({ 
-      category, 
-      isActive: true 
-    })
+    const products = await Product.find({ category, isActive: true })
       .limit(parseInt(limit))
       .sort({ createdAt: -1 });
 
-    res.json({
-      success: true,
-      products
-    });
+    res.json({ success: true, products });
   } catch (error) {
     console.error('❌ Get products by category error:', error);
-    res.status(500).json({ 
-      success: false,
-      message: error.message 
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -334,12 +259,9 @@ export const getProductsByCategory = async (req, res) => {
 export const getRelatedProducts = async (req, res) => {
   try {
     const product = await Product.findById(req.params.id);
-    
+
     if (!product) {
-      return res.status(404).json({ 
-        success: false,
-        message: 'Product not found' 
-      });
+      return res.status(404).json({ success: false, message: 'Product not found' });
     }
 
     const relatedProducts = await Product.find({
@@ -350,90 +272,98 @@ export const getRelatedProducts = async (req, res) => {
       .limit(4)
       .sort({ rating: -1 });
 
-    res.json({
-      success: true,
-      products: relatedProducts
-    });
+    res.json({ success: true, products: relatedProducts });
   } catch (error) {
     console.error('❌ Get related products error:', error);
-    res.status(500).json({ 
-      success: false,
-      message: error.message 
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// @desc    Create a product with image upload
+// @desc    Get top rated products
+// @route   GET /api/products/top
+// @access  Public
+export const getTopProducts = async (req, res) => {
+  try {
+    const products = await Product.find({ isActive: true })
+      .sort({ rating: -1 })
+      .limit(5)
+      .select('name price images image rating numReviews isFeatured isTrending');
+
+    res.json({ success: true, products });
+  } catch (error) {
+    console.error('❌ Get top products error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Get deal products
+// @route   GET /api/products/deals
+// @access  Public
+export const getDealProducts = async (req, res) => {
+  try {
+    const products = await Product.find({
+      isDeal: true,
+      isActive: true,
+      dealEnds: { $gt: new Date() }
+    })
+      .sort({ dealPrice: 1 })
+      .select('name price dealPrice dealEnds discount images image isFeatured isTrending');
+
+    res.json({ success: true, count: products.length, products });
+  } catch (error) {
+    console.error('❌ Get deal products error:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ============================================================
+// ADMIN ROUTES
+// ============================================================
+
+// @desc    Create a product with image upload (Cloudinary)
 // @route   POST /api/products
 // @access  Private/Admin
 export const createProduct = async (req, res) => {
-  try {
-    console.log('📦 Creating product with data:', req.body);
-    console.log('📸 Files received:', req.files?.length || 0);
+  const uploadedUrls = getUploadedUrls(req.files);
 
-    // Validation
+  try {
     const { name, price, description, category, countInStock } = req.body;
-    
+
     if (!name) {
-      return res.status(400).json({
-        success: false,
-        message: 'Product name is required'
-      });
+      await deleteCloudImages(uploadedUrls);
+      return res.status(400).json({ success: false, message: 'Product name is required' });
     }
     if (!price) {
-      return res.status(400).json({
-        success: false,
-        message: 'Price is required'
-      });
+      await deleteCloudImages(uploadedUrls);
+      return res.status(400).json({ success: false, message: 'Price is required' });
     }
     if (!description) {
-      return res.status(400).json({
-        success: false,
-        message: 'Description is required'
-      });
+      await deleteCloudImages(uploadedUrls);
+      return res.status(400).json({ success: false, message: 'Description is required' });
     }
     if (!category) {
-      return res.status(400).json({
-        success: false,
-        message: 'Category is required'
-      });
+      await deleteCloudImages(uploadedUrls);
+      return res.status(400).json({ success: false, message: 'Category is required' });
     }
-    if (!countInStock) {
-      return res.status(400).json({
-        success: false,
-        message: 'Stock quantity is required'
-      });
+    // 0 stock bhi valid hai, isliye undefined check
+    if (countInStock === undefined || countInStock === '') {
+      await deleteCloudImages(uploadedUrls);
+      return res.status(400).json({ success: false, message: 'Stock quantity is required' });
     }
 
-    // Handle image paths
-    let imagePaths = [];
-    if (req.files && req.files.length > 0) {
-      imagePaths = req.files.map(file => {
-        return `/uploads/${file.filename}`;
-      });
-    } else {
+    if (uploadedUrls.length === 0) {
       return res.status(400).json({
         success: false,
         message: 'At least one product image is required'
       });
     }
 
-    // Parse features if provided as JSON string
-    let features = [];
-    if (req.body.features) {
-      try {
-        features = JSON.parse(req.body.features);
-      } catch (e) {
-        features = req.body.features.split(',').map(f => f.trim());
-      }
-    }
+    const features = parseFeatures(req.body.features) || [];
 
-    // 🔥 FIXED: Consistent field naming - use isFeatured (not featured)
-    const isFeatured = req.body.isFeatured === 'true' || req.body.isFeatured === true;
-    const isTrending = req.body.isTrending === 'true' || req.body.isTrending === true;
-    const isDeal = req.body.isDeal === 'true' || req.body.isDeal === true;
+    const isFeatured = toBool(req.body.isFeatured);
+    const isTrending = toBool(req.body.isTrending);
+    const isDeal = toBool(req.body.isDeal);
 
-    // Create product object
     const productData = {
       name: name.trim(),
       price: Number(price),
@@ -441,14 +371,13 @@ export const createProduct = async (req, res) => {
       category,
       countInStock: Number(countInStock),
       brand: req.body.brand?.trim() || 'General',
-      image: imagePaths[0] || '',
-      images: imagePaths,
-      features: features.filter(f => f),
-      // 🔥 FIXED: Use consistent field names
+      image: uploadedUrls[0],
+      images: uploadedUrls,
+      features,
       isDeal,
       isFeatured,
       isTrending,
-      // Also set legacy fields for backward compatibility
+      // legacy fields in sync
       trending: isTrending,
       featured: isFeatured,
       isActive: true,
@@ -459,62 +388,44 @@ export const createProduct = async (req, res) => {
       numReviews: 0
     };
 
-    // Add deal fields if applicable
     if (isDeal) {
       if (!req.body.dealPrice) {
+        await deleteCloudImages(uploadedUrls);
         return res.status(400).json({
           success: false,
           message: 'Deal price is required for deal products'
         });
       }
       if (!req.body.dealEnds) {
+        await deleteCloudImages(uploadedUrls);
         return res.status(400).json({
           success: false,
           message: 'Deal end date is required for deal products'
         });
       }
-      
+
       productData.dealPrice = Number(req.body.dealPrice);
       productData.dealEnds = new Date(req.body.dealEnds);
       productData.discount = req.body.discount || '';
       productData.originalPrice = Number(price);
     }
 
-    const product = new Product(productData);
-    const createdProduct = await product.save();
-    
-    console.log('✅ Product created successfully:', createdProduct._id);
-    console.log('📸 Images saved:', imagePaths);
-    console.log('🔍 Product flags:', {
-      isFeatured: createdProduct.isFeatured,
-      isTrending: createdProduct.isTrending,
-      isDeal: createdProduct.isDeal
-    });
+    const createdProduct = await new Product(productData).save();
+
+    console.log('✅ Product created:', createdProduct._id);
 
     res.status(201).json({
       success: true,
       product: createdProduct,
       message: 'Product created successfully'
     });
-
   } catch (error) {
     console.error('❌ Product creation error:', error);
-    
-    // Clean up uploaded files if product creation failed
-    if (req.files && req.files.length > 0) {
-      req.files.forEach(file => {
-        const filePath = path.join(__dirname, '../../uploads', file.filename);
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
-          console.log('🧹 Cleaned up file:', file.filename);
-        }
-      });
-    }
 
-    res.status(500).json({ 
-      success: false,
-      message: error.message 
-    });
+    // Product save fail hua to Cloudinary se uploaded images hata do
+    await deleteCloudImages(uploadedUrls);
+
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -522,63 +433,50 @@ export const createProduct = async (req, res) => {
 // @route   PUT /api/products/:id
 // @access  Private/Admin
 export const updateProduct = async (req, res) => {
+  const uploadedUrls = getUploadedUrls(req.files);
+
   try {
     const product = await Product.findById(req.params.id);
-    
+
     if (!product) {
-      return res.status(404).json({ 
-        success: false,
-        message: 'Product not found' 
-      });
+      await deleteCloudImages(uploadedUrls);
+      return res.status(404).json({ success: false, message: 'Product not found' });
     }
 
-    console.log('🔄 Updating product with data:', req.body);
-
-    // Update fields
     product.name = req.body.name || product.name;
     product.price = req.body.price ? Number(req.body.price) : product.price;
     product.description = req.body.description || product.description;
     product.category = req.body.category || product.category;
-    product.countInStock = req.body.countInStock ? Number(req.body.countInStock) : product.countInStock;
-    product.brand = req.body.brand || product.brand;
-    
-    // Handle features
-    if (req.body.features) {
-      try {
-        product.features = JSON.parse(req.body.features);
-      } catch (e) {
-        product.features = req.body.features.split(',').map(f => f.trim());
-      }
+    if (req.body.countInStock !== undefined && req.body.countInStock !== '') {
+      product.countInStock = Number(req.body.countInStock);
     }
+    product.brand = req.body.brand || product.brand;
 
-    // Handle new images if uploaded
-    if (req.files && req.files.length > 0) {
-      const newImages = req.files.map(file => `/uploads/${file.filename}`);
-      product.images = [...product.images, ...newImages];
+    const features = parseFeatures(req.body.features);
+    if (features) product.features = features;
+
+    // Nayi images: Cloudinary URLs add hoti hain
+    if (uploadedUrls.length > 0) {
+      product.images = [...(product.images || []), ...uploadedUrls];
       product.image = product.images[0] || product.image;
     }
 
-    // 🔥 FIXED: Consistent flag updates
-    // isTrending
     if (req.body.isTrending !== undefined) {
-      const trendingValue = req.body.isTrending === 'true' || req.body.isTrending === true;
-      product.isTrending = trendingValue;
-      product.trending = trendingValue; // Keep legacy field in sync
-    }
-    
-    // isFeatured
-    if (req.body.isFeatured !== undefined) {
-      const featuredValue = req.body.isFeatured === 'true' || req.body.isFeatured === true;
-      product.isFeatured = featuredValue;
-      product.featured = featuredValue; // Keep legacy field in sync
-    }
-    
-    // isDeal
-    if (req.body.isDeal !== undefined) {
-      product.isDeal = req.body.isDeal === 'true' || req.body.isDeal === true;
+      const v = toBool(req.body.isTrending);
+      product.isTrending = v;
+      product.trending = v;
     }
 
-    // Update deal fields
+    if (req.body.isFeatured !== undefined) {
+      const v = toBool(req.body.isFeatured);
+      product.isFeatured = v;
+      product.featured = v;
+    }
+
+    if (req.body.isDeal !== undefined) {
+      product.isDeal = toBool(req.body.isDeal);
+    }
+
     if (product.isDeal) {
       product.dealPrice = req.body.dealPrice ? Number(req.body.dealPrice) : product.dealPrice;
       product.dealEnds = req.body.dealEnds ? new Date(req.body.dealEnds) : product.dealEnds;
@@ -587,26 +485,16 @@ export const updateProduct = async (req, res) => {
     }
 
     const updatedProduct = await product.save();
-    
-    console.log('✅ Product updated successfully:', updatedProduct._id);
-    console.log('🔍 Updated flags:', {
-      isFeatured: updatedProduct.isFeatured,
-      isTrending: updatedProduct.isTrending,
-      isDeal: updatedProduct.isDeal
-    });
 
     res.json({
       success: true,
       product: updatedProduct,
       message: 'Product updated successfully'
     });
-
   } catch (error) {
     console.error('❌ Update product error:', error);
-    res.status(500).json({ 
-      success: false,
-      message: error.message 
-    });
+    await deleteCloudImages(uploadedUrls);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -616,42 +504,20 @@ export const updateProduct = async (req, res) => {
 export const deleteProduct = async (req, res) => {
   try {
     const product = await Product.findById(req.params.id);
-    
+
     if (!product) {
-      return res.status(404).json({ 
-        success: false,
-        message: 'Product not found' 
-      });
+      return res.status(404).json({ success: false, message: 'Product not found' });
     }
 
-    console.log('🗑️ Permanently deleting product:', product._id, product.name);
+    // Cloudinary se images hatao (purani /uploads images skip hoti hain)
+    await deleteCloudImages(product.images || []);
 
-    // Delete associated images from filesystem
-    if (product.images && product.images.length > 0) {
-      product.images.forEach(imagePath => {
-        const filename = imagePath.split('/').pop();
-        const filePath = path.join(__dirname, '../../uploads', filename);
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
-          console.log('🗑️ Deleted image file:', filename);
-        }
-      });
-    }
-
-    // 🔥 HARD DELETE - Remove from database permanently
     await Product.findByIdAndDelete(req.params.id);
 
-    res.json({ 
-      success: true,
-      message: 'Product deleted permanently' 
-    });
-
+    res.json({ success: true, message: 'Product deleted permanently' });
   } catch (error) {
     console.error('❌ Delete product error:', error);
-    res.status(500).json({ 
-      success: false,
-      message: error.message 
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -661,29 +527,18 @@ export const deleteProduct = async (req, res) => {
 export const deactivateProduct = async (req, res) => {
   try {
     const product = await Product.findById(req.params.id);
-    
+
     if (!product) {
-      return res.status(404).json({ 
-        success: false,
-        message: 'Product not found' 
-      });
+      return res.status(404).json({ success: false, message: 'Product not found' });
     }
 
-    // Soft delete - just mark as inactive
     product.isActive = false;
     await product.save();
 
-    res.json({ 
-      success: true,
-      message: 'Product deactivated successfully' 
-    });
-
+    res.json({ success: true, message: 'Product deactivated successfully' });
   } catch (error) {
     console.error('❌ Deactivate product error:', error);
-    res.status(500).json({ 
-      success: false,
-      message: error.message 
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -693,28 +548,18 @@ export const deactivateProduct = async (req, res) => {
 export const restoreProduct = async (req, res) => {
   try {
     const product = await Product.findById(req.params.id);
-    
+
     if (!product) {
-      return res.status(404).json({ 
-        success: false,
-        message: 'Product not found' 
-      });
+      return res.status(404).json({ success: false, message: 'Product not found' });
     }
 
     product.isActive = true;
     await product.save();
 
-    res.json({ 
-      success: true,
-      message: 'Product restored successfully' 
-    });
-
+    res.json({ success: true, message: 'Product restored successfully' });
   } catch (error) {
     console.error('❌ Restore product error:', error);
-    res.status(500).json({ 
-      success: false,
-      message: error.message 
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -724,12 +569,9 @@ export const restoreProduct = async (req, res) => {
 export const duplicateProduct = async (req, res) => {
   try {
     const product = await Product.findById(req.params.id);
-    
+
     if (!product) {
-      return res.status(404).json({ 
-        success: false,
-        message: 'Product not found' 
-      });
+      return res.status(404).json({ success: false, message: 'Product not found' });
     }
 
     const productData = product.toObject();
@@ -750,13 +592,9 @@ export const duplicateProduct = async (req, res) => {
       product: duplicatedProduct,
       message: 'Product duplicated successfully'
     });
-
   } catch (error) {
     console.error('❌ Duplicate product error:', error);
-    res.status(500).json({ 
-      success: false,
-      message: error.message 
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -767,104 +605,35 @@ export const createReview = async (req, res) => {
   try {
     const { rating, comment } = req.body;
     const product = await Product.findById(req.params.id);
-    
+
     if (!product) {
-      return res.status(404).json({ 
-        success: false,
-        message: 'Product not found' 
-      });
+      return res.status(404).json({ success: false, message: 'Product not found' });
     }
 
     const alreadyReviewed = product.reviews.find(
-      r => r.user.toString() === req.user._id.toString()
+      (r) => r.user.toString() === req.user._id.toString()
     );
-    
+
     if (alreadyReviewed) {
-      return res.status(400).json({ 
-        success: false,
-        message: 'Product already reviewed' 
-      });
+      return res.status(400).json({ success: false, message: 'Product already reviewed' });
     }
-    
-    const review = {
+
+    product.reviews.push({
       name: req.user.name,
       rating: Number(rating),
       comment,
       user: req.user._id
-    };
-    
-    product.reviews.push(review);
-    product.numReviews = product.reviews.length;
-    
-    const totalRating = product.reviews.reduce((acc, r) => acc + r.rating, 0);
-    product.rating = totalRating / product.reviews.length;
-    
-    await product.save();
-    
-    res.status(201).json({ 
-      success: true,
-      message: 'Review added successfully' 
     });
+    product.numReviews = product.reviews.length;
+    product.rating =
+      product.reviews.reduce((acc, r) => acc + r.rating, 0) / product.reviews.length;
 
+    await product.save();
+
+    res.status(201).json({ success: true, message: 'Review added successfully' });
   } catch (error) {
     console.error('❌ Create review error:', error);
-    res.status(500).json({ 
-      success: false,
-      message: error.message 
-    });
-  }
-};
-
-// @desc    Get top rated products
-// @route   GET /api/products/top
-// @access  Public
-export const getTopProducts = async (req, res) => {
-  try {
-    const products = await Product.find({ isActive: true })
-      .sort({ rating: -1 })
-      .limit(5)
-      .select('name price images image rating numReviews isFeatured isTrending');
-    
-    res.json({
-      success: true,
-      products
-    });
-  } catch (error) {
-    console.error('❌ Get top products error:', error);
-    res.status(500).json({ 
-      success: false,
-      message: error.message 
-    });
-  }
-};
-
-// @desc    Get deal products
-// @route   GET /api/products/deals
-// @access  Public
-export const getDealProducts = async (req, res) => {
-  try {
-    const currentDate = new Date();
-    const products = await Product.find({
-      isDeal: true,
-      isActive: true,
-      dealEnds: { $gt: currentDate }
-    })
-      .sort({ dealPrice: 1 })
-      .select('name price dealPrice dealEnds discount images image isFeatured isTrending');
-    
-    console.log(`📦 Found ${products.length} active deals`);
-
-    res.json({
-      success: true,
-      count: products.length,
-      products
-    });
-  } catch (error) {
-    console.error('❌ Get deal products error:', error);
-    res.status(500).json({ 
-      success: false,
-      message: error.message 
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -873,9 +642,9 @@ export const getDealProducts = async (req, res) => {
 // @access  Private/Admin
 export const getFilteredProducts = async (req, res) => {
   try {
-    const { 
-      page = 1, 
-      limit = 10, 
+    const {
+      page = 1,
+      limit = 10,
       category,
       minPrice,
       maxPrice,
@@ -890,19 +659,11 @@ export const getFilteredProducts = async (req, res) => {
       includeInactive = 'false'
     } = req.query;
 
-    let filter = {};
-    
-    if (includeInactive !== 'true') {
-      filter.isActive = true;
-    }
+    const filter = {};
 
-    if (category && category !== 'all') {
-      filter.category = category;
-    }
-
-    if (brand && brand !== 'all') {
-      filter.brand = brand;
-    }
+    if (includeInactive !== 'true') filter.isActive = true;
+    if (category && category !== 'all') filter.category = category;
+    if (brand && brand !== 'all') filter.brand = brand;
 
     if (minPrice || maxPrice) {
       filter.price = {};
@@ -910,33 +671,22 @@ export const getFilteredProducts = async (req, res) => {
       if (maxPrice) filter.price.$lte = parseFloat(maxPrice);
     }
 
-    if (lowStock === 'true') {
-      filter.countInStock = { $lt: 10 };
-    }
-
-    if (isDeal === 'true') {
-      filter.isDeal = true;
-    }
-
-    if (isFeatured === 'true') {
-      filter.isFeatured = true;
-    }
-
-    if (isTrending === 'true') {
-      filter.isTrending = true;
-    }
+    if (lowStock === 'true') filter.countInStock = { $lt: 10 };
+    if (isDeal === 'true') filter.isDeal = true;
+    if (isFeatured === 'true') filter.isFeatured = true;
+    if (isTrending === 'true') filter.isTrending = true;
 
     if (search) {
+      const safe = escapeRegex(search);
       filter.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } },
-        { brand: { $regex: search, $options: 'i' } }
+        { name: { $regex: safe, $options: 'i' } },
+        { description: { $regex: safe, $options: 'i' } },
+        { brand: { $regex: safe, $options: 'i' } }
       ];
     }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
-    let sortOption = {};
-    sortOption[sort] = order === 'desc' ? -1 : 1;
+    const sortOption = { [sort]: order === 'desc' ? -1 : 1 };
 
     const products = await Product.find(filter)
       .sort(sortOption)
@@ -954,10 +704,7 @@ export const getFilteredProducts = async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Get filtered products error:', error);
-    res.status(500).json({ 
-      success: false,
-      message: error.message 
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -966,24 +713,14 @@ export const getFilteredProducts = async (req, res) => {
 // @access  Private/Admin
 export const getLowStockProducts = async (req, res) => {
   try {
-    console.log('📦 Fetching low stock products...');
-    
     const lowStockProducts = await Product.find({
       countInStock: { $lt: 10 }
     }).select('name countInStock price images image brand isFeatured isTrending');
 
-    console.log(`✅ Found ${lowStockProducts.length} low stock products`);
-    
-    res.json({
-      success: true,
-      data: lowStockProducts
-    });
+    res.json({ success: true, data: lowStockProducts });
   } catch (error) {
     console.error('❌ Get low stock products error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -992,36 +729,22 @@ export const getLowStockProducts = async (req, res) => {
 // @access  Private/Admin
 export const getProductStats = async (req, res) => {
   try {
-    const totalProducts = await Product.countDocuments({ isActive: true });
-    const dealProducts = await Product.countDocuments({ isDeal: true, isActive: true });
-    const featuredProducts = await Product.countDocuments({ isFeatured: true, isActive: true });
-    const trendingProducts = await Product.countDocuments({ isTrending: true, isActive: true });
-    const outOfStock = await Product.countDocuments({ countInStock: 0, isActive: true });
-
-    console.log('📊 Product stats:', {
-      totalProducts,
-      dealProducts,
-      featuredProducts,
-      trendingProducts,
-      outOfStock
-    });
+    const [totalProducts, dealProducts, featuredProducts, trendingProducts, outOfStock] =
+      await Promise.all([
+        Product.countDocuments({ isActive: true }),
+        Product.countDocuments({ isDeal: true, isActive: true }),
+        Product.countDocuments({ isFeatured: true, isActive: true }),
+        Product.countDocuments({ isTrending: true, isActive: true }),
+        Product.countDocuments({ countInStock: 0, isActive: true })
+      ]);
 
     res.json({
       success: true,
-      data: {
-        totalProducts,
-        dealProducts,
-        featuredProducts,
-        trendingProducts,
-        outOfStock
-      }
+      data: { totalProducts, dealProducts, featuredProducts, trendingProducts, outOfStock }
     });
   } catch (error) {
     console.error('❌ Get product stats error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -1043,13 +766,8 @@ export const getProductAnalytics = async (req, res) => {
 
     const productsOverTime = await Product.aggregate([
       { $match: { isActive: true } },
-      {
-        $group: {
-          _id: groupBy,
-          count: { $sum: 1 }
-        }
-      },
-      { $sort: { '_id': -1 } },
+      { $group: { _id: groupBy, count: { $sum: 1 } } },
+      { $sort: { _id: -1 } },
       { $limit: 12 }
     ]);
 
@@ -1070,19 +788,11 @@ export const getProductAnalytics = async (req, res) => {
 
     res.json({
       success: true,
-      data: {
-        productsOverTime,
-        mostViewed,
-        bestSelling,
-        topRated
-      }
+      data: { productsOverTime, mostViewed, bestSelling, topRated }
     });
   } catch (error) {
     console.error('❌ Get product analytics error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -1094,10 +804,7 @@ export const bulkUpdateProducts = async (req, res) => {
     const { productIds, action, value } = req.body;
 
     if (!productIds || !Array.isArray(productIds) || productIds.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Product IDs are required'
-      });
+      return res.status(400).json({ success: false, message: 'Product IDs are required' });
     }
 
     let update = {};
@@ -1124,29 +831,19 @@ export const bulkUpdateProducts = async (req, res) => {
         update = { isActive: false };
         break;
       default:
-        return res.status(400).json({
-          success: false,
-          message: 'Invalid action'
-        });
+        return res.status(400).json({ success: false, message: 'Invalid action' });
     }
 
-    const result = await Product.updateMany(
-      { _id: { $in: productIds } },
-      { $set: update }
-    );
+    const result = await Product.updateMany({ _id: { $in: productIds } }, { $set: update });
 
     res.json({
       success: true,
       message: `Updated ${result.modifiedCount} products successfully`,
       modifiedCount: result.modifiedCount
     });
-
   } catch (error) {
     console.error('❌ Bulk update error:', error);
-    res.status(500).json({ 
-      success: false,
-      message: error.message 
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -1155,10 +852,11 @@ export const bulkUpdateProducts = async (req, res) => {
 // @access  Private/Admin
 export const exportProducts = async (req, res) => {
   try {
-    const products = await Product.find({ isActive: true })
-      .select('name price description category brand countInStock isDeal isFeatured isTrending rating numReviews');
+    const products = await Product.find({ isActive: true }).select(
+      'name price description category brand countInStock isDeal isFeatured isTrending rating numReviews'
+    );
 
-    const csvData = products.map(p => ({
+    const csvData = products.map((p) => ({
       Name: p.name,
       Price: p.price,
       Description: p.description?.substring(0, 100),
@@ -1172,16 +870,10 @@ export const exportProducts = async (req, res) => {
       Reviews: p.numReviews
     }));
 
-    res.json({
-      success: true,
-      data: csvData
-    });
+    res.json({ success: true, data: csvData });
   } catch (error) {
     console.error('❌ Export products error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -1191,47 +883,33 @@ export const exportProducts = async (req, res) => {
 export const importProducts = async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        message: 'Please upload a file'
-      });
+      return res.status(400).json({ success: false, message: 'Please upload a file' });
     }
 
-    res.json({
-      success: true,
-      message: 'Products imported successfully'
-    });
+    res.json({ success: true, message: 'Products imported successfully' });
   } catch (error) {
     console.error('❌ Import products error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
-// @desc    Debug endpoint to check featured products
+// @desc    Debug endpoint to check featured products (development only)
 // @route   GET /api/products/debug/featured
-// @access  Public (temporary)
+// @access  Public (disabled in production)
 export const debugFeaturedProducts = async (req, res) => {
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(404).json({ success: false, message: 'Not found' });
+  }
+
   try {
-    // Get all products
     const allProducts = await Product.find({}).limit(20).select('name isFeatured featured isActive');
-    
-    // Count products with different flags
-    const isFeaturedTrue = await Product.countDocuments({ isFeatured: true });
-    const featuredTrue = await Product.countDocuments({ featured: true });
-    const isActiveTrue = await Product.countDocuments({ isActive: true });
-    const totalProducts = await Product.countDocuments();
-    
-    // Sample products
-    const samples = allProducts.map(p => ({
-      id: p._id,
-      name: p.name,
-      isFeatured: p.isFeatured,
-      featured: p.featured,
-      isActive: p.isActive
-    }));
+
+    const [isFeaturedTrue, featuredTrue, isActiveTrue, totalProducts] = await Promise.all([
+      Product.countDocuments({ isFeatured: true }),
+      Product.countDocuments({ featured: true }),
+      Product.countDocuments({ isActive: true }),
+      Product.countDocuments()
+    ]);
 
     res.json({
       success: true,
@@ -1242,7 +920,13 @@ export const debugFeaturedProducts = async (req, res) => {
           isFeatured: isFeaturedTrue,
           featuredLegacy: featuredTrue
         },
-        samples
+        samples: allProducts.map((p) => ({
+          id: p._id,
+          name: p.name,
+          isFeatured: p.isFeatured,
+          featured: p.featured,
+          isActive: p.isActive
+        }))
       }
     });
   } catch (error) {
