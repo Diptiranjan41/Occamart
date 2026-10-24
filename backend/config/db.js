@@ -1,17 +1,22 @@
-// backend/config/db.js
 import mongoose from 'mongoose';
 
 const connectDB = async () => {
+  const uri = process.env.MONGO_URI;
+
+  if (!uri) {
+    console.error('❌ MONGO_URI is not set. Add it in Render → Environment.');
+    if (process.env.NODE_ENV === 'production') process.exit(1);
+    return;
+  }
+
   try {
-    const conn = await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/ecommerce', {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
+    const conn = await mongoose.connect(uri, {
+      serverSelectionTimeoutMS: 15000,
     });
-    
-    console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
-  } catch (error) {
-    console.error(`❌ Error: ${error.message}`);
-    process.exit(1);
+    console.log(`✅ MongoDB connected: ${conn.connection.host}`);
+  } catch (err) {
+    // err.message never contains the password
+    console.error('❌ MONGO ERROR:', err.message);
   }
 };
 
