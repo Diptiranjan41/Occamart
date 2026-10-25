@@ -456,6 +456,7 @@ const TrendingProducts = () => {
                                     </span>
                                 </div>
 
+                                
                                 <div style={styles.price}>
                                     {product.isDeal && product.dealPrice ? (
                                         <>
