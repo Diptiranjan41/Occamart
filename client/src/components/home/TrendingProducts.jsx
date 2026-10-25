@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Heart, ShoppingBag, Star, Loader } from 'lucide-react';
 
-// Shared axios instance (baseURL, token, errors sab yahin handle hote hain)
-import api, { SERVER_URL } from '../api/api';
+// ⚠️ Ye file src/components/home/ mein hai, isliye api.js tak do level upar jaana padta hai.
+// (src/components/home -> src/components -> src -> src/api/api.js)
+import api, { SERVER_URL } from '../../api/api';
 
+// Context imports pehle jaise hi rakhe hain (purani file mein bhi yahi paths the aur build hota tha).
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
 import { useWishlist } from '../context/WishlistContext';
@@ -456,7 +458,6 @@ const TrendingProducts = () => {
                                     </span>
                                 </div>
 
-                                
                                 <div style={styles.price}>
                                     {product.isDeal && product.dealPrice ? (
                                         <>
