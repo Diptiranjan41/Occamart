@@ -1,1467 +1,1244 @@
 // src/pages/OrderHistory.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { orderAPI } from '../api/api';
-import { 
-    Package, 
-    Calendar, 
-    DollarSign, 
-    ChevronRight, 
-    AlertCircle,
-    ShoppingBag,
-    Clock,
-    Truck,
-    CheckCircle,
-    XCircle,
-    Loader,
-    Star,
-    RotateCcw,
-    MessageSquare,
-    FileText,
-    RefreshCw,
-    ThumbsUp,
-    HelpCircle,
-    CheckSquare
+import {
+  Package,
+  Calendar,
+  IndianRupee,
+  ChevronRight,
+  AlertCircle,
+  ShoppingBag,
+  Clock,
+  Truck,
+  CheckCircle,
+  XCircle,
+  Loader,
+  Star,
+  RotateCcw,
+  RefreshCw,
+  MessageCircle,
+  X,
+  MapPin,
+  CreditCard,
+  Eye,
+  Check,
 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
+import axios from 'axios';
 import ProductReviewModal from '../components/ProductReviewModal';
 import ReturnRequestModal from '../components/ReturnRequestModal';
-import axios from 'axios';
 import { useAuth } from '../components/context/AuthContext';
+import { useCart } from '../components/context/CartContext';
 
 const API_URL = 'http://localhost:5000/api';
+const SERVER_URL = 'http://localhost:5000';
 
-const OrderHistory = () => {
-    const { user, token, isAuthenticated } = useAuth();
-    const navigate = useNavigate();
-    const [orders, setOrders] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState('');
-    const [hoveredOrder, setHoveredOrder] = useState(null);
-    const [expandedOrder, setExpandedOrder] = useState(null);
-    const [windowWidth, setWindowWidth] = useState(typeof window !== 'undefined' ? window.innerWidth : 1200);
-    
-    // Review modal state
-    const [showReviewModal, setShowReviewModal] = useState(false);
-    const [selectedProduct, setSelectedProduct] = useState(null);
-    const [selectedOrder, setSelectedOrder] = useState(null);
-    const [reviewSuccess, setReviewSuccess] = useState('');
-    const [reviewError, setReviewError] = useState('');
+/* =====================================================================
+   THEME + CONSTANTS
+===================================================================== */
+const colors = {
+  bgPrimary: '#FAF7F2',
+  bgSecondary: '#F5F0E8',
+  primary: '#D4AF37',
+  primaryDark: '#B8962E',
+  primaryLight: '#E5C97A',
+  textPrimary: '#1F2937',
+  textSecondary: '#4B5563',
+  textLight: '#6B7280',
+  border: '#E0D9CD',
+  success: '#10B981',
+  warning: '#F59E0B',
+  error: '#EF4444',
+  info: '#3B82F6',
+  pink: '#EC4899',
+  white: '#FFFFFF',
+};
 
-    // Return modal state
-    const [showReturnModal, setShowReturnModal] = useState(false);
-    const [returnSuccess, setReturnSuccess] = useState('');
-    const [returnError, setReturnError] = useState('');
-    const [returnRequests, setReturnRequests] = useState({});
-    const [loadingReturns, setLoadingReturns] = useState(false);
-    const [returnFeatureEnabled, setReturnFeatureEnabled] = useState(true);
+const STATUS_META = {
+  pending: { text: 'Pending', icon: Clock, color: colors.warning, step: 0 },
+  processing: { text: 'Processing', icon: Clock, color: colors.warning, step: 1 },
+  shipped: { text: 'Shipped', icon: Package, color: colors.info, step: 2 },
+  'out-for-delivery': { text: 'Out for Delivery', icon: Truck, color: colors.pink, step: 3 },
+  delivered: { text: 'Delivered', icon: CheckCircle, color: colors.success, step: 4 },
+  cancelled: { text: 'Cancelled', icon: XCircle, color: colors.error, step: -1 },
+};
 
-    // Colors
-    const colors = {
-        bgPrimary: '#FAF7F2',
-        bgSecondary: '#F5F0E8',
-        bgGlass: 'rgba(250, 247, 242, 0.85)',
-        bgGlassDark: 'rgba(245, 240, 232, 0.95)',
-        primary: '#D4AF37',
-        primaryDark: '#B8962E',
-        primaryLight: '#E5C97A',
-        textPrimary: '#1F2937',
-        textSecondary: '#4B5563',
-        textLight: '#6B7280',
-        border: '#E0D9CD',
-        success: '#10B981',
-        successGlow: 'rgba(16, 185, 129, 0.3)',
-        warning: '#F59E0B',
-        warningGlow: 'rgba(245, 158, 11, 0.3)',
-        error: '#EF4444',
-        errorGlow: 'rgba(239, 68, 68, 0.3)',
-        info: '#3B82F6',
-        infoGlow: 'rgba(59, 130, 246, 0.3)',
-        purple: '#8B5CF6',
-        purpleGlow: 'rgba(139, 92, 246, 0.3)',
-        pink: '#EC4899',
-        pinkGlow: 'rgba(236, 72, 153, 0.3)',
-        white: '#FFFFFF',
-        black: '#000000',
-    };
+const STEPS = ['Placed', 'Processing', 'Shipped', 'Out for delivery', 'Delivered'];
 
-    useEffect(() => {
-        const handleResize = () => setWindowWidth(window.innerWidth);
-        window.addEventListener('resize', handleResize);
-        return () => window.removeEventListener('resize', handleResize);
-    }, []);
+const ACTIVE_KEYS = ['pending', 'processing', 'shipped', 'out-for-delivery'];
 
-    // Check authentication on mount
-    useEffect(() => {
-        console.log('🔐 Auth State:', { 
-            isAuthenticated, 
-            hasToken: !!token,
-            user: user?.email 
-        });
-        
-        if (!isAuthenticated || !token) {
-            console.log('❌ Not authenticated, redirecting to login');
-            navigate('/login');
-        } else {
-            fetchOrders();
-        }
-    }, [isAuthenticated, token, navigate]);
+const RETURN_WINDOW_DAYS = 7;
 
-    // Fetch return requests for orders
-    useEffect(() => {
-        if (orders.length > 0 && token && isAuthenticated) {
-            fetchReturnRequests();
-        }
-    }, [orders, token, isAuthenticated]);
+/* =====================================================================
+   HELPERS
+===================================================================== */
+const getStatusKey = (order) => {
+  const raw = String(order.status || '').toLowerCase().trim().replace(/[\s_]+/g, '-');
+  if (raw === 'cancelled' || raw === 'canceled') return 'cancelled';
+  if (raw === 'delivered' || order.isDelivered) return 'delivered';
+  return STATUS_META[raw] ? raw : 'pending';
+};
 
-    // Add CSS animations
-    useEffect(() => {
-        const style = document.createElement('style');
-        style.textContent = `
-            @keyframes spin {
-                0% { transform: rotate(0deg); }
-                100% { transform: rotate(360deg); }
-            }
-            
-            @keyframes float {
-                0% { transform: translateY(0px); }
-                50% { transform: translateY(-5px); }
-                100% { transform: translateY(0px); }
-            }
-            
-            @keyframes slideIn {
-                from {
-                    opacity: 0;
-                    transform: translateX(20px);
-                }
-                to {
-                    opacity: 1;
-                    transform: translateX(0);
-                }
-            }
-            
-            @keyframes pulse {
-                0% { transform: scale(1); }
-                50% { transform: scale(1.05); }
-                100% { transform: scale(1); }
-            }
-            
-            .order-card {
-                transition: all 0.3s ease;
-            }
-            
-            .order-card:hover {
-                transform: translateY(-5px);
-                box-shadow: 0 10px 30px rgba(212, 175, 55, 0.15);
-            }
-            
-            .status-badge {
-                display: inline-flex;
-                align-items: center;
-                gap: 6px;
-                padding: 6px 12px;
-                border-radius: 30px;
-                font-size: 0.85rem;
-                font-weight: 600;
-            }
-            
-            .status-delivered {
-                background: ${colors.success}15;
-                color: ${colors.success};
-                border: 1px solid ${colors.success}30;
-            }
-            
-            .status-out-for-delivery {
-                background: ${colors.pink}15;
-                color: ${colors.pink};
-                border: 1px solid ${colors.pink}30;
-            }
-            
-            .status-shipped {
-                background: ${colors.info}15;
-                color: ${colors.info};
-                border: 1px solid ${colors.info}30;
-            }
-            
-            .status-processing {
-                background: ${colors.warning}15;
-                color: ${colors.warning};
-                border: 1px solid ${colors.warning}30;
-            }
-            
-            .status-pending {
-                background: ${colors.warning}15;
-                color: ${colors.warning};
-                border: 1px solid ${colors.warning}30;
-            }
-            
-            .status-cancelled {
-                background: ${colors.error}15;
-                color: ${colors.error};
-                border: 1px solid ${colors.error}30;
-            }
-            
-            .item-badge {
-                background: ${colors.bgSecondary};
-                border: 1px solid ${colors.border};
-                border-radius: 12px;
-                padding: 12px;
-                transition: all 0.3s ease;
-            }
-            
-            .item-badge:hover {
-                background: ${colors.white};
-                border-color: ${colors.primary};
-                transform: translateY(-2px);
-                box-shadow: 0 5px 15px ${colors.primary}20;
-            }
-            
-            .return-badge {
-                background: ${colors.info}15;
-                border: 1px solid ${colors.info}30;
-                border-radius: 20px;
-                padding: 4px 10px;
-                font-size: 0.75rem;
-                color: ${colors.info};
-                display: inline-flex;
-                align-items: center;
-                gap: 4px;
-            }
-            
-            .return-approved {
-                background: ${colors.success}15;
-                border: 1px solid ${colors.success}30;
-                color: ${colors.success};
-            }
-            
-            .return-rejected {
-                background: ${colors.error}15;
-                border: 1px solid ${colors.error}30;
-                color: ${colors.error};
-            }
-            
-            .return-pending {
-                background: ${colors.warning}15;
-                border: 1px solid ${colors.warning}30;
-                color: ${colors.warning};
-            }
-            
-            .review-btn, .return-btn {
-                background: transparent;
-                border: 2px solid ${colors.primary};
-                color: ${colors.primary};
-                padding: 6px 12px;
-                border-radius: 20px;
-                font-size: 0.8rem;
-                font-weight: 600;
-                cursor: pointer;
-                transition: all 0.3s ease;
-                display: inline-flex;
-                align-items: center;
-                gap: 5px;
-                width: 100%;
-                justify-content: center;
-            }
-            
-            .review-btn:hover, .return-btn:hover {
-                background: ${colors.primary};
-                color: ${colors.white};
-            }
-            
-            .return-btn {
-                border-color: ${colors.info};
-                color: ${colors.info};
-            }
-            
-            .return-btn:hover {
-                background: ${colors.info};
-                color: ${colors.white};
-            }
-            
-            .reviewed-badge {
-                background: ${colors.success}15;
-                color: ${colors.success};
-                padding: 6px 12px;
-                border-radius: 20px;
-                font-size: 0.8rem;
-                font-weight: 600;
-                display: inline-flex;
-                align-items: center;
-                gap: 5px;
-                width: 100%;
-                justify-content: center;
-                border: 1px solid ${colors.success}30;
-            }
-            
-            .view-details-btn {
-                background: transparent;
-                border: 2px solid ${colors.primary};
-                color: ${colors.primary};
-                padding: 8px 20px;
-                border-radius: 30px;
-                font-weight: 600;
-                transition: all 0.3s ease;
-                display: inline-flex;
-                align-items: center;
-                gap: 8px;
-                text-decoration: none;
-            }
-            
-            .view-details-btn:hover {
-                background: ${colors.primary};
-                color: ${colors.white};
-            }
-            
-            .empty-state {
-                animation: float 3s ease-in-out infinite;
-            }
-            
-            .return-timeline {
-                display: flex;
-                align-items: center;
-                gap: 4px;
-                margin-top: 4px;
-                font-size: 0.75rem;
-            }
-            
-            .return-timeline-dot {
-                width: 6px;
-                height: 6px;
-                border-radius: 50%;
-                background: ${colors.textLight};
-            }
-            
-            @media (max-width: 768px) {
-                .review-btn, .return-btn, .reviewed-badge {
-                    width: 100%;
-                }
-            }
-        `;
-        document.head.appendChild(style);
+const getProductId = (item) => item?.product?._id || item?.product || item?.productId || null;
 
-        return () => {
-            document.head.removeChild(style);
-        };
-    }, []);
+const toImageUrl = (src) => {
+  if (!src || typeof src !== 'string') return '';
+  return src.startsWith('http') || src.startsWith('data:') ? src : `${SERVER_URL}${src}`;
+};
 
-    // Fetch orders and check review status
-    const fetchOrders = async () => {
-        try {
-            setLoading(true);
-            setError('');
-            
-            console.log('📦 Fetching orders with token:', token ? 'Token exists' : 'No token');
-            
-            if (!token) {
-                throw new Error('No authentication token found');
-            }
+const getProductImage = (product) => {
+  if (!product) return '';
+  if (product.image) return toImageUrl(product.image);
+  if (Array.isArray(product.images) && product.images.length > 0) {
+    const img = product.images[0];
+    return toImageUrl(typeof img === 'string' ? img : img?.url);
+  }
+  return '';
+};
 
-            const response = await orderAPI.getMyOrders();
-            
-            console.log('✅ Orders response:', response.data);
+const formatDate = (d) => {
+  try {
+    return new Date(d).toLocaleDateString('en-IN', { year: 'numeric', month: 'short', day: 'numeric' });
+  } catch {
+    return '';
+  }
+};
 
-            let ordersData = [];
-            if (response.data && response.data.orders) {
-                ordersData = response.data.orders;
-            } else if (Array.isArray(response.data)) {
-                ordersData = response.data;
-            } else if (response.data && response.data.data) {
-                ordersData = response.data.data;
-            }
+const formatTime = (d) => {
+  try {
+    return new Date(d).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+  } catch {
+    return '';
+  }
+};
 
-            // Fetch reviews to check review status
-            const reviewStatus = {};
-            
-            if (token) {
-                try {
-                    console.log('📝 Fetching user reviews...');
-                    
-                    const reviewResponse = await axios.get(`${API_URL}/reviews/user`, {
-                        headers: { 
-                            Authorization: `Bearer ${token}`,
-                            'Content-Type': 'application/json'
-                        }
-                    });
-                    
-                    if (reviewResponse.data && reviewResponse.data.success) {
-                        reviewResponse.data.data.forEach(review => {
-                            if (review.product) {
-                                const productId = review.product._id || review.product;
-                                reviewStatus[productId] = true;
-                            }
-                        });
-                        console.log('✅ Reviews fetched:', Object.keys(reviewStatus).length);
-                    }
-                } catch (err) {
-                    console.error('❌ Error fetching reviews:', err.response?.data || err.message);
-                }
-            }
-            
-            // Update orders with review status
-            const updatedOrders = ordersData.map(order => ({
-                ...order,
-                orderItems: order.orderItems?.map(item => {
-                    const productId = item.product?._id || item.product;
-                    return {
-                        ...item,
-                        productId: productId,
-                        isReviewed: reviewStatus[productId] || false
-                    };
-                })
-            }));
+const formatMoney = (n) =>
+  `₹${Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-            setOrders(updatedOrders);
-        } catch (error) {
-            console.error('❌ Error fetching orders:', {
-                message: error.message,
-                response: error.response?.data,
-                status: error.response?.status
-            });
-            
-            if (error.response?.status === 401) {
-                setError('Your session has expired. Please login again.');
-            } else {
-                setError(error.response?.data?.message || 'Failed to load orders');
-            }
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    // Fetch return requests for all orders - UPDATED to handle 404 gracefully
-    const fetchReturnRequests = async () => {
-        try {
-            setLoadingReturns(true);
-            
-            if (!token) {
-                console.log('No token for return requests');
-                return;
-            }
-
-            const requests = {};
-            
-            for (const order of orders) {
-                try {
-                    console.log(`Fetching returns for order ${order._id}`);
-                    
-                    const response = await axios.get(`${API_URL}/returns/order/${order._id}`, {
-                        headers: { 
-                            Authorization: `Bearer ${token}`,
-                            'Content-Type': 'application/json'
-                        },
-                        validateStatus: (status) => status < 500 // Don't throw on 404
-                    });
-                    
-                    // Check if response is successful and has data
-                    if (response.status === 200 && response.data && response.data.success) {
-                        // Handle different response structures
-                        const returnData = response.data.data || response.data.returns || response.data;
-                        if (returnData && (Array.isArray(returnData) ? returnData.length > 0 : true)) {
-                            requests[order._id] = returnData;
-                            console.log(`Found returns for order ${order._id}:`, returnData);
-                        } else {
-                            console.log(`No returns found for order ${order._id} (empty response)`);
-                        }
-                    } else if (response.status === 404) {
-                        // 404 means no returns - this is normal, not an error
-                        console.log(`No returns found for order ${order._id} (404)`);
-                    } else {
-                        console.log(`Unexpected response for order ${order._id}:`, response.status);
-                    }
-                } catch (err) {
-                    // Only log non-404 errors
-                    if (err.response?.status !== 404) {
-                        console.log(`Error fetching returns for order ${order._id}:`, err.message);
-                    } else {
-                        console.log(`No returns found for order ${order._id} (404 handled)`);
-                    }
-                }
-            }
-            
-            setReturnRequests(requests);
-            setReturnFeatureEnabled(true);
-        } catch (error) {
-            console.error('❌ Error in fetchReturnRequests:', error);
-            setReturnFeatureEnabled(false);
-        } finally {
-            setLoadingReturns(false);
-        }
-    };
-
-    // Handle return click
-    const handleReturnClick = (order, item) => {
-        console.log('🔄 Return clicked:', { orderId: order._id, item });
-        setSelectedOrder(order);
-        setSelectedProduct(item);
-        setShowReturnModal(true);
-    };
-
-    // Handle return success
-    const handleReturnSuccess = async (returnData) => {
-        console.log('✅ Return success:', returnData);
-        setReturnSuccess('Return request submitted successfully!');
-        
-        // Refresh return requests
-        await fetchReturnRequests();
-        
-        setTimeout(() => setReturnSuccess(''), 3000);
-    };
-
-    // Handle return error
-    const handleReturnError = (errorMsg) => {
-        console.error('❌ Return error:', errorMsg);
-        setReturnError(errorMsg);
-        setTimeout(() => setReturnError(''), 3000);
-    };
-
-    // Handle review click
-    const handleReviewClick = (order, product) => {
-        console.log('⭐ Review clicked:', { orderId: order._id, product });
-        setSelectedOrder(order);
-        setSelectedProduct(product);
-        setShowReviewModal(true);
-    };
-
-    // Handle review success
-    const handleReviewSuccess = async (productId) => {
-        console.log('✅ Review success for product:', productId);
-        setReviewSuccess('Thank you for your review!');
-        
-        // Refresh orders to get updated review status
-        await fetchOrders();
-        
-        setTimeout(() => setReviewSuccess(''), 3000);
-    };
-
-    // Handle review error
-    const handleReviewError = (errorMsg) => {
-        console.error('❌ Review error:', errorMsg);
-        setReviewError(errorMsg);
-        setTimeout(() => setReviewError(''), 3000);
-    };
-
-    // Get status details
-    const getStatusDetails = (order) => {
-        if (order.status === 'delivered' || order.isDelivered) {
-            return { 
-                text: 'Delivered', 
-                icon: CheckCircle,
-                color: colors.success,
-                className: 'status-delivered'
-            };
-        } else if (order.status === 'out-for-delivery') {
-            return { 
-                text: 'Out for Delivery', 
-                icon: Truck,
-                color: colors.pink,
-                className: 'status-out-for-delivery'
-            };
-        } else if (order.status === 'shipped') {
-            return { 
-                text: 'Shipped', 
-                icon: Package,
-                color: colors.info,
-                className: 'status-shipped'
-            };
-        } else if (order.status === 'processing') {
-            return { 
-                text: 'Processing', 
-                icon: Clock,
-                color: colors.warning,
-                className: 'status-processing'
-            };
-        } else if (order.status === 'cancelled') {
-            return { 
-                text: 'Cancelled', 
-                icon: XCircle,
-                color: colors.error,
-                className: 'status-cancelled'
-            };
-        } else if (order.status === 'pending') {
-            return { 
-                text: 'Pending', 
-                icon: Clock,
-                color: colors.warning,
-                className: 'status-pending'
-            };
-        } else if (order.isPaid) {
-            return { 
-                text: 'Paid', 
-                icon: CheckCircle,
-                color: colors.success,
-                className: 'status-delivered'
-            };
-        } else {
-            return { 
-                text: 'Pending', 
-                icon: Clock,
-                color: colors.warning,
-                className: 'status-pending'
-            };
-        }
-    };
-
-    // Get return status for an item
-    const getItemReturnStatus = (orderId, itemId) => {
-        try {
-            const orderReturns = returnRequests[orderId];
-            if (!orderReturns) return null;
-            
-            // Handle both array and object responses
-            const returnsArray = Array.isArray(orderReturns) ? orderReturns : [orderReturns];
-            
-            const itemReturn = returnsArray.find(r => 
-                r.items && r.items.some(i => {
-                    const productId = i.product?.toString() || i.product;
-                    return productId === itemId?.toString();
-                })
-            );
-            
-            if (!itemReturn) return null;
-            
-            return {
-                status: itemReturn.status || 'pending',
-                requestDate: itemReturn.createdAt || itemReturn.requestedAt,
-                id: itemReturn._id || itemReturn.returnId
-            };
-        } catch (error) {
-            console.error('Error getting return status:', error);
-            return null;
-        }
-    };
-
-    // Check if item is eligible for return
-    const isReturnEligible = (order, item) => {
-        try {
-            // Check if order is delivered
-            if (order.status !== 'delivered' && !order.isDelivered) {
-                return false;
-            }
-            
-            // Check if within 7 days of delivery (standard return window)
-            const deliveryDate = order.deliveredAt || order.createdAt;
-            if (!deliveryDate) return false;
-            
-            const daysSinceDelivery = (new Date() - new Date(deliveryDate)) / (1000 * 60 * 60 * 24);
-            
-            if (daysSinceDelivery > 7) {
-                return false;
-            }
-            
-            // Check if already returned
-            const returnStatus = getItemReturnStatus(order._id, item.productId || item.product);
-            if (returnStatus) {
-                return false;
-            }
-            
-            return true;
-        } catch (error) {
-            console.error('Error checking return eligibility:', error);
-            return false;
-        }
-    };
-
-    const formatDate = (dateString) => {
-        try {
-            return new Date(dateString).toLocaleDateString('en-IN', {
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric'
-            });
-        } catch {
-            return 'Invalid Date';
-        }
-    };
-
-    const formatTime = (dateString) => {
-        try {
-            return new Date(dateString).toLocaleTimeString('en-IN', {
-                hour: '2-digit',
-                minute: '2-digit'
-            });
-        } catch {
-            return '';
-        }
-    };
-
-    const calculateOrderStats = () => {
-        const totalOrders = orders.length;
-        const totalSpent = orders.reduce((sum, order) => sum + (order.totalPrice || 0), 0);
-        const deliveredOrders = orders.filter(o => o.status === 'delivered' || o.isDelivered).length;
-        const outForDeliveryOrders = orders.filter(o => o.status === 'out-for-delivery').length;
-        const pendingOrders = orders.filter(o => o.status === 'pending' || o.status === 'processing').length;
-        
-        return { totalOrders, totalSpent, deliveredOrders, outForDeliveryOrders, pendingOrders };
-    };
-
-    const stats = calculateOrderStats();
-
-    // Show login prompt if not authenticated
-    if (!isAuthenticated || !token) {
-        return (
-            <div style={{
-                minHeight: '100vh',
-                background: colors.bgPrimary,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexDirection: 'column',
-                gap: '20px',
-                padding: '20px'
-            }}>
-                <AlertCircle size={50} color={colors.error} />
-                <h2 style={{ color: colors.textPrimary, fontSize: '1.5rem' }}>Authentication Required</h2>
-                <p style={{ color: colors.textSecondary }}>Please log in to view your orders.</p>
-                <button
-                    onClick={() => navigate('/login')}
-                    style={{
-                        background: `linear-gradient(135deg, ${colors.primary} 0%, ${colors.primaryDark} 100%)`,
-                        color: colors.white,
-                        border: 'none',
-                        padding: '12px 30px',
-                        borderRadius: '30px',
-                        fontSize: '1rem',
-                        fontWeight: '600',
-                        cursor: 'pointer'
-                    }}
-                >
-                    Go to Login
-                </button>
-            </div>
-        );
-    }
-
-    if (loading) {
-        return (
-            <div style={{
-                minHeight: '100vh',
-                background: colors.bgPrimary,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexDirection: 'column',
-                gap: '20px',
-            }}>
-                <Loader size={50} color={colors.primary} style={{ animation: 'spin 1s linear infinite' }} />
-                <p style={{ color: colors.textSecondary, fontSize: '1.1rem' }}>Loading your orders...</p>
-            </div>
-        );
-    }
-
-    return (
-        <div style={{
-            minHeight: '100vh',
-            background: colors.bgPrimary,
-            padding: '40px 20px',
-            position: 'relative',
-        }}>
-            {/* Background gradients */}
-            <div style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                background: `radial-gradient(circle at 20% 30%, ${colors.primary}10 0%, transparent 50%)`,
-                pointerEvents: 'none',
-            }} />
-            <div style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                background: `radial-gradient(circle at 80% 70%, ${colors.primaryLight}10 0%, transparent 50%)`,
-                pointerEvents: 'none',
-            }} />
-
-            {/* Success messages */}
-            {reviewSuccess && (
-                <div style={{
-                    position: 'fixed',
-                    top: '100px',
-                    right: '20px',
-                    background: colors.success,
-                    color: colors.white,
-                    padding: '15px 25px',
-                    borderRadius: '12px',
-                    boxShadow: `0 10px 30px ${colors.success}40`,
-                    zIndex: 9999,
-                    animation: 'slideIn 0.3s ease-out',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '10px'
-                }}>
-                    <CheckCircle size={20} />
-                    {reviewSuccess}
-                </div>
-            )}
-
-            {returnSuccess && (
-                <div style={{
-                    position: 'fixed',
-                    top: '160px',
-                    right: '20px',
-                    background: colors.info,
-                    color: colors.white,
-                    padding: '15px 25px',
-                    borderRadius: '12px',
-                    boxShadow: `0 10px 30px ${colors.info}40`,
-                    zIndex: 9999,
-                    animation: 'slideIn 0.3s ease-out',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '10px'
-                }}>
-                    <RefreshCw size={20} />
-                    {returnSuccess}
-                </div>
-            )}
-
-            {/* Error messages */}
-            {reviewError && (
-                <div style={{
-                    position: 'fixed',
-                    top: '100px',
-                    right: '20px',
-                    background: colors.error,
-                    color: colors.white,
-                    padding: '15px 25px',
-                    borderRadius: '12px',
-                    boxShadow: `0 10px 30px ${colors.error}40`,
-                    zIndex: 9999,
-                    animation: 'slideIn 0.3s ease-out',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '10px'
-                }}>
-                    <AlertCircle size={20} />
-                    {reviewError}
-                </div>
-            )}
-
-            {returnError && (
-                <div style={{
-                    position: 'fixed',
-                    top: '160px',
-                    right: '20px',
-                    background: colors.error,
-                    color: colors.white,
-                    padding: '15px 25px',
-                    borderRadius: '12px',
-                    boxShadow: `0 10px 30px ${colors.error}40`,
-                    zIndex: 9999,
-                    animation: 'slideIn 0.3s ease-out',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '10px'
-                }}>
-                    <AlertCircle size={20} />
-                    {returnError}
-                </div>
-            )}
-
-            <div style={{
-                maxWidth: '1200px',
-                margin: '0 auto',
-                position: 'relative',
-                zIndex: 2,
-            }}>
-                {/* Header Section */}
-                <div style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    marginBottom: '30px',
-                    flexWrap: 'wrap',
-                    gap: '20px',
-                }}>
-                    <div>
-                        <h1 style={{
-                            fontSize: windowWidth <= 768 ? '2rem' : '2.5rem',
-                            fontWeight: '800',
-                            color: colors.textPrimary,
-                            marginBottom: '8px',
-                            background: `linear-gradient(135deg, ${colors.textPrimary}, ${colors.primary})`,
-                            WebkitBackgroundClip: 'text',
-                            WebkitTextFillColor: 'transparent',
-                        }}>
-                            Order History
-                        </h1>
-                        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                            <span style={{
-                                background: colors.white,
-                                border: `1px solid ${colors.border}`,
-                                padding: '6px 16px',
-                                borderRadius: '30px',
-                                fontSize: '0.9rem',
-                                color: colors.textSecondary,
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '6px',
-                            }}>
-                                <ShoppingBag size={16} color={colors.primary} />
-                                {orders.length} {orders.length === 1 ? 'Order' : 'Orders'}
-                            </span>
-                            {stats.totalSpent > 0 && (
-                                <span style={{
-                                    background: colors.white,
-                                    border: `1px solid ${colors.border}`,
-                                    padding: '6px 16px',
-                                    borderRadius: '30px',
-                                    fontSize: '0.9rem',
-                                    color: colors.textSecondary,
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '6px',
-                                }}>
-                                    <DollarSign size={16} color={colors.primary} />
-                                    Total Spent: ₹{stats.totalSpent.toFixed(2)}
-                                </span>
-                            )}
-                            {/* Refresh Button */}
-                            <button
-                                onClick={fetchOrders}
-                                style={{
-                                    background: colors.white,
-                                    border: `1px solid ${colors.border}`,
-                                    padding: '6px 16px',
-                                    borderRadius: '30px',
-                                    fontSize: '0.9rem',
-                                    color: colors.textSecondary,
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '6px',
-                                    cursor: 'pointer',
-                                    transition: 'all 0.3s ease',
-                                }}
-                                onMouseEnter={(e) => {
-                                    e.currentTarget.style.borderColor = colors.primary;
-                                    e.currentTarget.style.color = colors.primary;
-                                }}
-                                onMouseLeave={(e) => {
-                                    e.currentTarget.style.borderColor = colors.border;
-                                    e.currentTarget.style.color = colors.textSecondary;
-                                }}
-                            >
-                                <RefreshCw size={16} />
-                                Refresh
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* Stats Cards */}
-                    <div style={{
-                        display: 'flex',
-                        gap: '15px',
-                        flexWrap: 'wrap',
-                    }}>
-                        <div style={{
-                            background: colors.white,
-                            border: `1px solid ${colors.border}`,
-                            borderRadius: '16px',
-                            padding: '12px 20px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '12px',
-                            boxShadow: `0 4px 12px rgba(0,0,0,0.02)`,
-                        }}>
-                            <div style={{
-                                width: '40px',
-                                height: '40px',
-                                background: colors.bgSecondary,
-                                borderRadius: '12px',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                border: `1px solid ${colors.border}`,
-                            }}>
-                                <CheckCircle size={20} color={colors.success} />
-                            </div>
-                            <div>
-                                <div style={{ fontSize: '0.8rem', color: colors.textLight }}>Delivered</div>
-                                <div style={{ fontSize: '1.3rem', fontWeight: '700', color: colors.textPrimary }}>
-                                    {stats.deliveredOrders}
-                                </div>
-                            </div>
-                        </div>
-
-                        <div style={{
-                            background: colors.white,
-                            border: `1px solid ${colors.border}`,
-                            borderRadius: '16px',
-                            padding: '12px 20px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '12px',
-                            boxShadow: `0 4px 12px rgba(0,0,0,0.02)`,
-                        }}>
-                            <div style={{
-                                width: '40px',
-                                height: '40px',
-                                background: colors.bgSecondary,
-                                borderRadius: '12px',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                border: `1px solid ${colors.border}`,
-                            }}>
-                                <Truck size={20} color={colors.pink} />
-                            </div>
-                            <div>
-                                <div style={{ fontSize: '0.8rem', color: colors.textLight }}>Out for Delivery</div>
-                                <div style={{ fontSize: '1.3rem', fontWeight: '700', color: colors.textPrimary }}>
-                                    {stats.outForDeliveryOrders}
-                                </div>
-                            </div>
-                        </div>
-
-                        <div style={{
-                            background: colors.white,
-                            border: `1px solid ${colors.border}`,
-                            borderRadius: '16px',
-                            padding: '12px 20px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '12px',
-                            boxShadow: `0 4px 12px rgba(0,0,0,0.02)`,
-                        }}>
-                            <div style={{
-                                width: '40px',
-                                height: '40px',
-                                background: colors.bgSecondary,
-                                borderRadius: '12px',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                border: `1px solid ${colors.border}`,
-                            }}>
-                                <Clock size={20} color={colors.warning} />
-                            </div>
-                            <div>
-                                <div style={{ fontSize: '0.8rem', color: colors.textLight }}>Pending</div>
-                                <div style={{ fontSize: '1.3rem', fontWeight: '700', color: colors.textPrimary }}>
-                                    {stats.pendingOrders}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                {error && (
-                    <div style={{
-                        background: `${colors.error}10`,
-                        border: `1px solid ${colors.error}`,
-                        borderRadius: '16px',
-                        padding: '20px',
-                        marginBottom: '30px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '12px',
-                        backdropFilter: 'blur(8px)',
-                    }}>
-                        <AlertCircle size={24} color={colors.error} />
-                        <span style={{ color: colors.error, fontSize: '1rem' }}>{error}</span>
-                        <button
-                            onClick={fetchOrders}
-                            style={{
-                                marginLeft: 'auto',
-                                background: colors.error,
-                                color: colors.white,
-                                border: 'none',
-                                padding: '8px 20px',
-                                borderRadius: '20px',
-                                cursor: 'pointer',
-                                fontWeight: '600',
-                            }}
-                        >
-                            Retry
-                        </button>
-                    </div>
-                )}
-
-                {!error && orders.length === 0 ? (
-                    <div className="empty-state" style={{
-                        background: colors.white,
-                        border: `1px solid ${colors.border}`,
-                        borderRadius: '32px',
-                        padding: '60px 20px',
-                        maxWidth: '500px',
-                        margin: '40px auto',
-                        textAlign: 'center',
-                    }}>
-                        <div style={{ marginBottom: '30px' }}>
-                            <Package size={80} color={colors.primary} />
-                        </div>
-                        <h3 style={{ color: colors.textPrimary, fontSize: '1.8rem', marginBottom: '15px' }}>
-                            No Orders Yet
-                        </h3>
-                        <p style={{ color: colors.textSecondary, fontSize: '1.1rem', marginBottom: '30px' }}>
-                            Looks like you haven't placed any orders yet. Start shopping to see your orders here!
-                        </p>
-                        <Link to="/shop" style={{
-                            background: `linear-gradient(135deg, ${colors.primary} 0%, ${colors.primaryDark} 100%)`,
-                            color: colors.white,
-                            border: 'none',
-                            padding: '14px 40px',
-                            borderRadius: '30px',
-                            fontSize: '1.1rem',
-                            fontWeight: '600',
-                            cursor: 'pointer',
-                            textDecoration: 'none',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '10px',
-                            transition: 'all 0.3s ease',
-                            boxShadow: `0 8px 20px -5px ${colors.primary}`,
-                        }}>
-                            <ShoppingBag size={20} />
-                            Start Shopping
-                        </Link>
-                    </div>
-                ) : (
-                    <div style={{
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '20px',
-                    }}>
-                        {orders.map((order, index) => {
-                            const status = getStatusDetails(order);
-                            const StatusIcon = status.icon;
-                            const isDelivered = order.status === 'delivered' || order.isDelivered;
-                            
-                            return (
-                                <div
-                                    key={order._id}
-                                    className="order-card"
-                                    style={{
-                                        animation: `slideIn 0.5s ease-out ${index * 0.1}s`,
-                                        background: colors.white,
-                                        border: `1px solid ${colors.border}`,
-                                        borderRadius: '20px',
-                                        overflow: 'hidden',
-                                    }}
-                                    onMouseEnter={() => setHoveredOrder(order._id)}
-                                    onMouseLeave={() => setHoveredOrder(null)}
-                                >
-                                    <div style={{ padding: '25px' }}>
-                                        {/* Order Header */}
-                                        <div style={{
-                                            display: 'flex',
-                                            justifyContent: 'space-between',
-                                            alignItems: 'center',
-                                            marginBottom: '20px',
-                                            flexWrap: 'wrap',
-                                            gap: '15px',
-                                        }}>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '15px', flexWrap: 'wrap' }}>
-                                                <div style={{
-                                                    width: '50px',
-                                                    height: '50px',
-                                                    background: colors.bgSecondary,
-                                                    borderRadius: '15px',
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    justifyContent: 'center',
-                                                    border: `1px solid ${colors.border}`,
-                                                }}>
-                                                    <Package size={24} color={colors.primary} />
-                                                </div>
-                                                <div>
-                                                    <h3 style={{
-                                                        fontSize: '1.2rem',
-                                                        fontWeight: '600',
-                                                        color: colors.textPrimary,
-                                                        marginBottom: '5px',
-                                                    }}>
-                                                        Order #{order._id?.slice(-8).toUpperCase()}
-                                                    </h3>
-                                                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                                                        <span className={`status-badge ${status.className}`}>
-                                                            <StatusIcon size={14} />
-                                                            {status.text}
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <div style={{ textAlign: 'right' }}>
-                                                <div style={{
-                                                    fontSize: '1.5rem',
-                                                    fontWeight: '700',
-                                                    color: colors.primary,
-                                                    marginBottom: '5px',
-                                                }}>
-                                                    ₹{order.totalPrice?.toFixed(2) || 0}
-                                                </div>
-                                                <div style={{
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    gap: '5px',
-                                                    color: colors.textLight,
-                                                    fontSize: '0.9rem',
-                                                }}>
-                                                    <Calendar size={14} />
-                                                    {formatDate(order.createdAt)} at {formatTime(order.createdAt)}
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        {/* Order Items */}
-                                        <div style={{ marginBottom: '20px' }}>
-                                            <div style={{
-                                                display: 'flex',
-                                                justifyContent: 'space-between',
-                                                alignItems: 'center',
-                                                marginBottom: '15px',
-                                            }}>
-                                                <h4 style={{
-                                                    fontSize: '1rem',
-                                                    fontWeight: '600',
-                                                    color: colors.textSecondary,
-                                                }}>
-                                                    Items ({order.orderItems?.length || 0})
-                                                </h4>
-                                                <button
-                                                    onClick={() => setExpandedOrder(expandedOrder === order._id ? null : order._id)}
-                                                    style={{
-                                                        background: 'none',
-                                                        border: 'none',
-                                                        color: colors.primary,
-                                                        cursor: 'pointer',
-                                                        fontSize: '0.9rem',
-                                                        fontWeight: '500',
-                                                        display: 'flex',
-                                                        alignItems: 'center',
-                                                        gap: '5px',
-                                                    }}
-                                                >
-                                                    {expandedOrder === order._id ? 'Show Less' : 'Show All'}
-                                                </button>
-                                            </div>
-                                            
-                                            <div style={{
-                                                display: 'grid',
-                                                gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))',
-                                                gap: '10px',
-                                            }}>
-                                                {(expandedOrder === order._id 
-                                                    ? order.orderItems 
-                                                    : order.orderItems?.slice(0, 3)
-                                                )?.map((item, itemIndex) => {
-                                                    const returnStatus = getItemReturnStatus(order._id, item.productId || item.product);
-                                                    
-                                                    return (
-                                                        <div
-                                                            key={itemIndex}
-                                                            className="item-badge"
-                                                        >
-                                                            <div style={{
-                                                                display: 'flex',
-                                                                flexDirection: 'column',
-                                                                gap: '8px',
-                                                            }}>
-                                                                <div style={{
-                                                                    fontWeight: '600',
-                                                                    color: colors.textPrimary,
-                                                                    fontSize: '0.95rem',
-                                                                }}>
-                                                                    {item.name}
-                                                                </div>
-                                                                
-                                                                {/* Return Status Badge */}
-                                                                {returnStatus && (
-                                                                    <div className={`return-badge ${
-                                                                        returnStatus.status === 'approved' ? 'return-approved' :
-                                                                        returnStatus.status === 'rejected' ? 'return-rejected' :
-                                                                        'return-pending'
-                                                                    }`}>
-                                                                        <RefreshCw size={12} />
-                                                                        Return {returnStatus.status}
-                                                                        <span className="return-timeline">
-                                                                            • {formatDate(returnStatus.requestDate)}
-                                                                        </span>
-                                                                    </div>
-                                                                )}
-                                                                
-                                                                <div style={{
-                                                                    display: 'flex',
-                                                                    justifyContent: 'space-between',
-                                                                    alignItems: 'center',
-                                                                }}>
-                                                                    <span style={{
-                                                                        fontSize: '0.85rem',
-                                                                        color: colors.textLight,
-                                                                    }}>
-                                                                        Qty: {item.qty}
-                                                                    </span>
-                                                                    <span style={{
-                                                                        fontSize: '0.95rem',
-                                                                        fontWeight: '600',
-                                                                        color: colors.primary,
-                                                                    }}>
-                                                                        ₹{item.price}
-                                                                    </span>
-                                                                </div>
-                                                                
-                                                                {/* Action Buttons for delivered items */}
-                                                                {isDelivered && (
-                                                                    <div style={{ 
-                                                                        display: 'grid',
-                                                                        gridTemplateColumns: '1fr 1fr',
-                                                                        gap: '8px',
-                                                                        marginTop: '5px'
-                                                                    }}>
-                                                                        {/* Review Button */}
-                                                                        {item.isReviewed ? (
-                                                                            <span className="reviewed-badge">
-                                                                                <CheckCircle size={14} />
-                                                                                Reviewed
-                                                                            </span>
-                                                                        ) : (
-                                                                            <button
-                                                                                className="review-btn"
-                                                                                onClick={(e) => {
-                                                                                    e.stopPropagation();
-                                                                                    e.preventDefault();
-                                                                                    handleReviewClick(order, {
-                                                                                        ...item,
-                                                                                        productId: item.productId || item.product,
-                                                                                        product: item.product
-                                                                                    });
-                                                                                }}
-                                                                            >
-                                                                                <Star size={14} />
-                                                                                Review
-                                                                            </button>
-                                                                        )}
-                                                                        
-                                                                        {/* Return Button - Only show if eligible and not already returned */}
-                                                                        {!returnStatus && isReturnEligible(order, item) && (
-                                                                            <button
-                                                                                className="return-btn"
-                                                                                onClick={(e) => {
-                                                                                    e.stopPropagation();
-                                                                                    e.preventDefault();
-                                                                                    handleReturnClick(order, {
-                                                                                        ...item,
-                                                                                        productId: item.productId || item.product
-                                                                                    });
-                                                                                }}
-                                                                            >
-                                                                                <RotateCcw size={14} />
-                                                                                Return
-                                                                            </button>
-                                                                        )}
-                                                                    </div>
-                                                                )}
-                                                            </div>
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
-                                            
-                                            {!expandedOrder && order.orderItems?.length > 3 && (
-                                                <div style={{
-                                                    textAlign: 'center',
-                                                    marginTop: '10px',
-                                                    color: colors.textLight,
-                                                    fontSize: '0.9rem',
-                                                }}>
-                                                    +{order.orderItems.length - 3} more items
-                                                </div>
-                                            )}
-                                        </div>
-
-                                        {/* Action Buttons */}
-                                        <div style={{
-                                            display: 'flex',
-                                            justifyContent: 'space-between',
-                                            alignItems: 'center',
-                                            flexWrap: 'wrap',
-                                            gap: '15px',
-                                            marginTop: '10px',
-                                            paddingTop: '20px',
-                                            borderTop: `1px solid ${colors.border}`,
-                                        }}>
-                                            <div style={{
-                                                display: 'flex',
-                                                gap: '15px',
-                                                flexWrap: 'wrap',
-                                            }}>
-                                                <div style={{
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    gap: '5px',
-                                                    color: colors.textLight,
-                                                    fontSize: '0.9rem',
-                                                    cursor: 'pointer',
-                                                }}>
-                                                    <RotateCcw size={16} color={colors.primary} />
-                                                    <span>Reorder</span>
-                                                </div>
-                                                <div style={{
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    gap: '5px',
-                                                    color: colors.textLight,
-                                                    fontSize: '0.9rem',
-                                                    cursor: 'pointer',
-                                                }}>
-                                                    <HelpCircle size={16} color={colors.primary} />
-                                                    <span>Need Help?</span>
-                                                </div>
-                                            </div>
-                                            
-                                            <Link
-                                                to={`/orders/${order._id}`}
-                                                className="view-details-btn"
-                                                onClick={() => console.log('🔗 Navigating to order:', order._id)}
-                                            >
-                                                View Details
-                                                <ChevronRight size={16} />
-                                            </Link>
-                                        </div>
-                                    </div>
-                                </div>
-                            );
-                        })}
-                    </div>
-                )}
-            </div>
-
-            {/* Review Modal */}
-            {showReviewModal && selectedProduct && selectedOrder && (
-                <ProductReviewModal
-                    product={{
-                        ...selectedProduct,
-                        _id: selectedProduct.productId || selectedProduct.product
-                    }}
-                    order={selectedOrder}
-                    onClose={() => {
-                        setShowReviewModal(false);
-                        setSelectedProduct(null);
-                        setSelectedOrder(null);
-                    }}
-                    onSuccess={handleReviewSuccess}
-                    onError={handleReviewError}
-                />
-            )}
-
-            {/* Return Request Modal */}
-            {showReturnModal && selectedProduct && selectedOrder && (
-                <ReturnRequestModal
-                    product={selectedProduct}
-                    order={selectedOrder}
-                    onClose={() => {
-                        setShowReturnModal(false);
-                        setSelectedProduct(null);
-                        setSelectedOrder(null);
-                    }}
-                    onSuccess={handleReturnSuccess}
-                    onError={handleReturnError}
-                />
-            )}
-        </div>
+// Product details cache (one request per product, shared by all cards)
+const productCache = new Map();
+const loadProduct = (id) => {
+  if (!id) return Promise.resolve(null);
+  if (!productCache.has(id)) {
+    productCache.set(
+      id,
+      axios
+        .get(`${API_URL}/products/${id}`)
+        .then((res) => {
+          const d = res.data;
+          return d?.product || d?.data || d;
+        })
+        .catch(() => null)
     );
+  }
+  return productCache.get(id);
+};
+
+const useProduct = (id) => {
+  const [product, setProduct] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    if (id) loadProduct(id).then((p) => alive && setProduct(p));
+    return () => {
+      alive = false;
+    };
+  }, [id]);
+  return product;
+};
+
+/* =====================================================================
+   STYLES
+===================================================================== */
+const css = `
+  @keyframes oh-spin { to { transform: rotate(360deg); } }
+  @keyframes oh-slide { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes oh-toast { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+
+  .oh-spin { animation: oh-spin 1s linear infinite; }
+
+  .oh-card {
+    background: ${colors.white};
+    border: 1px solid ${colors.border};
+    border-radius: 20px;
+    overflow: hidden;
+    animation: oh-slide 0.4s ease-out both;
+    transition: box-shadow 0.3s ease, border-color 0.3s ease;
+  }
+  .oh-card:hover { box-shadow: 0 10px 30px rgba(212,175,55,0.15); border-color: ${colors.primaryLight}; }
+
+  .oh-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 5px 12px; border-radius: 30px;
+    font-size: 0.82rem; font-weight: 600; border: 1px solid transparent;
+  }
+
+  /* stepper */
+  .oh-stepper { display: flex; margin: 4px 0 22px; }
+  .oh-step { flex: 1; position: relative; display: flex; flex-direction: column; align-items: center; text-align: center; }
+  .oh-step-dot {
+    width: 20px; height: 20px; border-radius: 50%;
+    background: ${colors.white}; border: 2px solid ${colors.border};
+    display: flex; align-items: center; justify-content: center;
+    color: ${colors.white}; z-index: 2;
+  }
+  .oh-step.done .oh-step-dot { background: ${colors.primary}; border-color: ${colors.primary}; }
+  .oh-step.current .oh-step-dot { box-shadow: 0 0 0 4px ${colors.primary}30; }
+  .oh-step-line { position: absolute; top: 9px; left: 50%; width: 100%; height: 2px; background: ${colors.border}; z-index: 1; }
+  .oh-step-line.done { background: ${colors.primary}; }
+  .oh-step-label { margin-top: 8px; font-size: 0.75rem; color: ${colors.textLight}; }
+  .oh-step.done .oh-step-label { color: ${colors.textPrimary}; font-weight: 600; }
+  .oh-cancelled-bar {
+    display: flex; align-items: center; gap: 8px;
+    background: ${colors.error}10; color: ${colors.error};
+    border: 1px solid ${colors.error}30; border-radius: 12px;
+    padding: 10px 14px; margin-bottom: 20px; font-size: 0.9rem; font-weight: 600;
+  }
+
+  /* items */
+  .oh-item {
+    display: grid; grid-template-columns: 72px 1fr auto; gap: 14px; align-items: start;
+    background: ${colors.bgSecondary}; border: 1px solid ${colors.border};
+    border-radius: 14px; padding: 12px;
+  }
+  .oh-thumb {
+    width: 72px; height: 72px; border-radius: 10px; background: ${colors.white};
+    border: 1px solid ${colors.border}; overflow: hidden;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .oh-thumb img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .oh-item-name { font-weight: 600; color: ${colors.textPrimary}; font-size: 0.98rem; margin-bottom: 4px; }
+  .oh-item-meta { color: ${colors.textLight}; font-size: 0.85rem; }
+  .oh-item-price { text-align: right; font-weight: 700; color: ${colors.primary}; white-space: nowrap; }
+  .oh-item-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+
+  /* review */
+  .oh-review-box {
+    margin-top: 10px; background: ${colors.white}; border: 1px solid ${colors.success}40;
+    border-left: 4px solid ${colors.success}; border-radius: 10px; padding: 10px 12px;
+  }
+  .oh-review-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 0.8rem; color: ${colors.success}; font-weight: 600; }
+  .oh-review-date { color: ${colors.textLight}; font-weight: 400; margin-left: auto; }
+  .oh-review-title { font-weight: 600; color: ${colors.textPrimary}; font-size: 0.9rem; margin-top: 6px; }
+  .oh-review-text { color: ${colors.textSecondary}; font-size: 0.88rem; margin: 4px 0 0; line-height: 1.5; word-break: break-word; }
+
+  /* buttons */
+  .oh-btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    background: transparent; border: 2px solid ${colors.primary}; color: ${colors.primary};
+    padding: 7px 16px; border-radius: 30px; font-size: 0.85rem; font-weight: 600;
+    cursor: pointer; transition: all 0.25s ease; text-decoration: none; font-family: inherit;
+  }
+  .oh-btn:hover:not(:disabled) { background: ${colors.primary}; color: ${colors.white}; }
+  .oh-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+  .oh-btn.info { border-color: ${colors.info}; color: ${colors.info}; }
+  .oh-btn.info:hover:not(:disabled) { background: ${colors.info}; color: ${colors.white}; }
+  .oh-btn.solid { background: linear-gradient(135deg, ${colors.primary}, ${colors.primaryDark}); color: ${colors.white}; border-color: ${colors.primary}; }
+  .oh-btn.solid:hover:not(:disabled) { filter: brightness(1.05); }
+  .oh-btn.lg { padding: 10px 22px; font-size: 0.95rem; }
+
+  .oh-return-badge {
+    display: inline-flex; align-items: center; gap: 4px; margin-top: 8px;
+    padding: 4px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 600;
+  }
+
+  /* tabs */
+  .oh-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 24px; }
+  .oh-tab {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 9px 18px; border-radius: 30px; border: 1px solid ${colors.border};
+    background: ${colors.white}; color: ${colors.textSecondary};
+    font-size: 0.9rem; font-weight: 600; cursor: pointer; font-family: inherit; transition: all 0.25s ease;
+  }
+  .oh-tab:hover { border-color: ${colors.primary}; color: ${colors.primary}; }
+  .oh-tab.active { background: linear-gradient(135deg, ${colors.primary}, ${colors.primaryDark}); color: ${colors.white}; border-color: ${colors.primary}; }
+  .oh-tab-count { background: ${colors.bgSecondary}; color: ${colors.textSecondary}; border-radius: 20px; padding: 1px 8px; font-size: 0.75rem; }
+  .oh-tab.active .oh-tab-count { background: ${colors.white}; color: ${colors.primary}; }
+
+  /* modal */
+  .oh-overlay {
+    position: fixed; inset: 0; background: rgba(17,24,39,0.5); z-index: 1000;
+    display: flex; align-items: center; justify-content: center; padding: 20px;
+    animation: oh-toast 0.2s ease-out;
+  }
+  .oh-modal {
+    background: ${colors.bgPrimary}; width: 100%; max-width: 780px; max-height: 92vh;
+    overflow-y: auto; border-radius: 24px; border: 1px solid ${colors.border};
+    box-shadow: 0 30px 60px rgba(0,0,0,0.25);
+  }
+  .oh-modal-head {
+    position: sticky; top: 0; z-index: 3; background: ${colors.bgPrimary};
+    display: flex; justify-content: space-between; align-items: center; gap: 12px;
+    padding: 20px 24px; border-bottom: 1px solid ${colors.border};
+  }
+  .oh-modal-body { padding: 24px; display: flex; flex-direction: column; gap: 22px; }
+  .oh-panel { background: ${colors.white}; border: 1px solid ${colors.border}; border-radius: 16px; padding: 18px; }
+  .oh-panel h4 { margin: 0 0 12px; font-size: 1rem; color: ${colors.textPrimary}; display: flex; align-items: center; gap: 8px; }
+  .oh-close {
+    width: 38px; height: 38px; border-radius: 50%; border: 1px solid ${colors.border};
+    background: ${colors.white}; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  }
+  .oh-close:hover { border-color: ${colors.primary}; color: ${colors.primary}; }
+  .oh-detail-item { display: grid; grid-template-columns: 90px 1fr auto; gap: 16px; padding: 14px 0; border-bottom: 1px solid ${colors.bgSecondary}; }
+  .oh-detail-item:last-child { border-bottom: none; padding-bottom: 0; }
+  .oh-detail-item:first-of-type { padding-top: 0; }
+  .oh-detail-thumb { width: 90px; height: 90px; }
+  .oh-desc { color: ${colors.textSecondary}; font-size: 0.85rem; line-height: 1.5; margin: 6px 0 0;
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .oh-row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 0.92rem; color: ${colors.textSecondary}; }
+  .oh-row.total { border-top: 1px dashed ${colors.border}; margin-top: 6px; padding-top: 12px; font-weight: 700; font-size: 1.05rem; color: ${colors.textPrimary}; }
+  .oh-two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+  /* toast */
+  .oh-toast {
+    position: fixed; top: 100px; right: 20px; z-index: 9999; color: ${colors.white};
+    padding: 14px 22px; border-radius: 12px; display: flex; align-items: center; gap: 10px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.18); animation: oh-toast 0.3s ease-out; max-width: 90vw;
+  }
+
+  @media (max-width: 768px) {
+    .oh-item { grid-template-columns: 60px 1fr; }
+    .oh-item-price { grid-column: 2; text-align: left; }
+    .oh-thumb { width: 60px; height: 60px; }
+    .oh-step-label { font-size: 0.65rem; }
+    .oh-two-col { grid-template-columns: 1fr; }
+    .oh-detail-item { grid-template-columns: 70px 1fr; }
+    .oh-detail-item .oh-item-price { grid-column: 2; text-align: left; }
+    .oh-detail-thumb { width: 70px; height: 70px; }
+    .oh-modal-body { padding: 16px; }
+  }
+`;
+
+/* =====================================================================
+   SMALL COMPONENTS
+===================================================================== */
+const StatusBadge = ({ statusKey }) => {
+  const meta = STATUS_META[statusKey];
+  const Icon = meta.icon;
+  return (
+    <span
+      className="oh-badge"
+      style={{ background: `${meta.color}15`, color: meta.color, borderColor: `${meta.color}30` }}
+    >
+      <Icon size={14} /> {meta.text}
+    </span>
+  );
+};
+
+const OrderStepper = ({ statusKey }) => {
+  if (statusKey === 'cancelled') {
+    return (
+      <div className="oh-cancelled-bar">
+        <XCircle size={16} /> This order was cancelled
+      </div>
+    );
+  }
+  const current = STATUS_META[statusKey].step;
+  return (
+    <div className="oh-stepper">
+      {STEPS.map((label, i) => (
+        <div key={label} className={`oh-step ${i <= current ? 'done' : ''} ${i === current ? 'current' : ''}`}>
+          <div className="oh-step-dot">{i <= current && <Check size={11} strokeWidth={3} />}</div>
+          {i < STEPS.length - 1 && <div className={`oh-step-line ${i < current ? 'done' : ''}`} />}
+          <span className="oh-step-label">{label}</span>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+const StarRow = ({ rating = 0, size = 14 }) => (
+  <span style={{ display: 'inline-flex', gap: '2px' }}>
+    {[1, 2, 3, 4, 5].map((i) => (
+      <Star
+        key={i}
+        size={size}
+        color={i <= Math.round(rating) ? colors.primary : colors.border}
+        fill={i <= Math.round(rating) ? colors.primary : 'none'}
+      />
+    ))}
+  </span>
+);
+
+const ItemThumb = ({ item, className = 'oh-thumb' }) => {
+  const hasOwn = !!item.image;
+  const product = useProduct(hasOwn ? null : getProductId(item));
+  const src = hasOwn ? toImageUrl(item.image) : getProductImage(product);
+  const [failed, setFailed] = useState(false);
+
+  return (
+    <div className={className}>
+      {src && !failed ? (
+        <img src={src} alt={item.name} loading="lazy" onError={() => setFailed(true)} />
+      ) : (
+        <Package size={26} color={colors.primary} />
+      )}
+    </div>
+  );
+};
+
+const ReviewBox = ({ review }) => {
+  const text = review.comment || review.text || review.review || '';
+  return (
+    <div className="oh-review-box">
+      <div className="oh-review-head">
+        <CheckCircle size={14} /> Your review
+        <StarRow rating={review.rating} />
+        {review.createdAt && <span className="oh-review-date">{formatDate(review.createdAt)}</span>}
+      </div>
+      {review.title && <div className="oh-review-title">{review.title}</div>}
+      {text && <p className="oh-review-text">{text}</p>}
+    </div>
+  );
+};
+
+const returnColor = (status) =>
+  status === 'approved' ? colors.success : status === 'rejected' ? colors.error : colors.warning;
+
+/* One product row inside an order card */
+const OrderItemRow = ({ item, review, returnStatus, isDelivered, returnEligible, onReview, onReturn }) => (
+  <div className="oh-item">
+    <ItemThumb item={item} />
+
+    <div style={{ minWidth: 0 }}>
+      <div className="oh-item-name">{item.name}</div>
+      <div className="oh-item-meta">
+        Qty: {item.qty} × {formatMoney(item.price)}
+      </div>
+
+      {returnStatus && (
+        <div
+          className="oh-return-badge"
+          style={{
+            background: `${returnColor(returnStatus.status)}15`,
+            color: returnColor(returnStatus.status),
+            border: `1px solid ${returnColor(returnStatus.status)}30`,
+          }}
+        >
+          <RefreshCw size={12} /> Return {returnStatus.status}
+          {returnStatus.requestDate && <span>• {formatDate(returnStatus.requestDate)}</span>}
+        </div>
+      )}
+
+      {/* Real review saved in backend */}
+      {review && <ReviewBox review={review} />}
+
+      {/* After delivery: review option (+ return option) */}
+      {isDelivered && (
+        <div className="oh-item-actions">
+          {!review && (
+            <button className="oh-btn" onClick={onReview}>
+              <Star size={14} /> Write a Review
+            </button>
+          )}
+          {!returnStatus && returnEligible && (
+            <button className="oh-btn info" onClick={onReturn}>
+              <RotateCcw size={14} /> Return
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+
+    <div className="oh-item-price">{formatMoney((item.price || 0) * (item.qty || 1))}</div>
+  </div>
+);
+
+/* Product row inside the details modal (loads full product details) */
+const DetailItem = ({ item, review }) => {
+  const productId = getProductId(item);
+  const product = useProduct(productId);
+
+  return (
+    <div className="oh-detail-item">
+      <ItemThumb item={item} className="oh-thumb oh-detail-thumb" />
+      <div style={{ minWidth: 0 }}>
+        <div className="oh-item-name">{product?.name || item.name}</div>
+        <div className="oh-item-meta" style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+          {product?.brand && <span>Brand: {product.brand}</span>}
+          {product?.category && <span>Category: {product.category}</span>}
+          <span>Qty: {item.qty}</span>
+          <span>Unit: {formatMoney(item.price)}</span>
+        </div>
+        {product?.description && <p className="oh-desc">{product.description}</p>}
+        {review && <ReviewBox review={review} />}
+        {productId && (
+          <Link to={`/product/${productId}`} className="oh-btn" style={{ marginTop: '10px' }}>
+            <Eye size={14} /> View Product
+          </Link>
+        )}
+      </div>
+      <div className="oh-item-price">{formatMoney((item.price || 0) * (item.qty || 1))}</div>
+    </div>
+  );
+};
+
+/* =====================================================================
+   ORDER DETAILS MODAL
+===================================================================== */
+const OrderDetailsModal = ({ order, reviews, reordering, onClose, onReorder, onHelp }) => {
+  const statusKey = getStatusKey(order);
+  const addr = order.shippingAddress || {};
+  const addressLine = [addr.address, addr.city, addr.state, addr.postalCode, addr.country]
+    .filter(Boolean)
+    .join(', ');
+
+  useEffect(() => {
+    const onKey = (e) => e.key === 'Escape' && onClose();
+    document.addEventListener('keydown', onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [onClose]);
+
+  const summaryRows = [
+    ['Items', order.itemsPrice],
+    ['Shipping', order.shippingPrice],
+    ['Tax', order.taxPrice],
+    ['Discount', order.discountPrice ? -order.discountPrice : undefined],
+  ].filter(([, v]) => v !== undefined && v !== null);
+
+  return (
+    <div className="oh-overlay" onClick={onClose}>
+      <div className="oh-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="oh-modal-head">
+          <div>
+            <h3 style={{ margin: 0, fontSize: '1.2rem', color: colors.textPrimary }}>
+              Order #{order._id?.slice(-8).toUpperCase()}
+            </h3>
+            <div style={{ marginTop: '6px', display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <StatusBadge statusKey={statusKey} />
+              <span style={{ color: colors.textLight, fontSize: '0.85rem' }}>
+                Placed on {formatDate(order.createdAt)} at {formatTime(order.createdAt)}
+              </span>
+            </div>
+          </div>
+          <button className="oh-close" onClick={onClose} aria-label="Close">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="oh-modal-body">
+          <div className="oh-panel">
+            <OrderStepper statusKey={statusKey} />
+            {order.deliveredAt && statusKey === 'delivered' && (
+              <div style={{ color: colors.success, fontSize: '0.88rem', fontWeight: 600 }}>
+                Delivered on {formatDate(order.deliveredAt)}
+              </div>
+            )}
+          </div>
+
+          <div className="oh-panel">
+            <h4>
+              <Package size={18} color={colors.primary} /> Products ({order.orderItems?.length || 0})
+            </h4>
+            {(order.orderItems || []).map((item, i) => (
+              <DetailItem key={i} item={item} review={reviews[getProductId(item)]} />
+            ))}
+          </div>
+
+          <div className="oh-two-col">
+            <div className="oh-panel">
+              <h4>
+                <MapPin size={18} color={colors.primary} /> Shipping address
+              </h4>
+              {addr.fullName && <div style={{ fontWeight: 600, color: colors.textPrimary }}>{addr.fullName}</div>}
+              <div style={{ color: colors.textSecondary, fontSize: '0.92rem', lineHeight: 1.6 }}>
+                {addressLine || 'Address not available'}
+              </div>
+              {addr.phone && (
+                <div style={{ color: colors.textSecondary, fontSize: '0.9rem', marginTop: '4px' }}>
+                  Phone: {addr.phone}
+                </div>
+              )}
+            </div>
+
+            <div className="oh-panel">
+              <h4>
+                <CreditCard size={18} color={colors.primary} /> Payment
+              </h4>
+              <div style={{ color: colors.textSecondary, fontSize: '0.92rem' }}>
+                Method: <strong>{order.paymentMethod || 'N/A'}</strong>
+              </div>
+              <div
+                style={{
+                  marginTop: '6px',
+                  fontSize: '0.9rem',
+                  fontWeight: 600,
+                  color: order.isPaid ? colors.success : colors.warning,
+                }}
+              >
+                {order.isPaid ? `Paid on ${formatDate(order.paidAt)}` : 'Payment pending'}
+              </div>
+            </div>
+          </div>
+
+          <div className="oh-panel">
+            <h4>Price details</h4>
+            {summaryRows.map(([label, value]) => (
+              <div className="oh-row" key={label}>
+                <span>{label}</span>
+                <span>{value < 0 ? `-${formatMoney(-value)}` : formatMoney(value)}</span>
+              </div>
+            ))}
+            <div className="oh-row total">
+              <span>Total</span>
+              <span style={{ color: colors.primary }}>{formatMoney(order.totalPrice)}</span>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+            <button className="oh-btn solid lg" onClick={() => onReorder(order)} disabled={reordering}>
+              {reordering ? <Loader size={16} className="oh-spin" /> : <RotateCcw size={16} />} Reorder
+            </button>
+            <button className="oh-btn lg" onClick={() => onHelp(order)}>
+              <MessageCircle size={16} /> Need Help?
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* =====================================================================
+   MAIN PAGE
+===================================================================== */
+const OrderHistory = () => {
+  const { user, token, isAuthenticated } = useAuth();
+  const { addToCart } = useCart();
+  const navigate = useNavigate();
+
+  const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [filter, setFilter] = useState('all');
+  const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
+
+  // reviews saved in backend: { [productId]: review }
+  const [userReviews, setUserReviews] = useState({});
+
+  // return requests: { [orderId]: data }
+  const [returnRequests, setReturnRequests] = useState({});
+
+  // modals
+  const [detailsOrderId, setDetailsOrderId] = useState(null);
+  const [showReviewModal, setShowReviewModal] = useState(false);
+  const [showReturnModal, setShowReturnModal] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [selectedOrder, setSelectedOrder] = useState(null);
+
+  const [reorderingId, setReorderingId] = useState(null);
+
+  const showToast = (message, type = 'success') => {
+    setToast({ show: true, message, type });
+    setTimeout(() => setToast((t) => ({ ...t, show: false })), 3000);
+  };
+
+  const authHeaders = useCallback(
+    () => ({ Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }),
+    [token]
+  );
+
+  /* ---------------- data loading ---------------- */
+  const fetchOrders = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError('');
+      if (!token) throw new Error('No authentication token found');
+
+      const response = await orderAPI.getMyOrders();
+      const data = response.data;
+      let list = [];
+      if (Array.isArray(data)) list = data;
+      else if (Array.isArray(data?.orders)) list = data.orders;
+      else if (Array.isArray(data?.data)) list = data.data;
+
+      setOrders(list);
+    } catch (err) {
+      console.error('Error fetching orders:', err);
+      if (err.response?.status === 401) setError('Your session has expired. Please login again.');
+      else setError(err.response?.data?.message || 'Failed to load orders');
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
+
+  // Real reviews of this user (saved in backend)
+  const fetchUserReviews = useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await axios.get(`${API_URL}/reviews/user`, { headers: authHeaders() });
+      const d = res.data;
+      const list = Array.isArray(d) ? d : d?.data || d?.reviews || [];
+      const map = {};
+      list.forEach((r) => {
+        const pid = r.product?._id || r.product;
+        if (pid) map[pid] = r;
+      });
+      setUserReviews(map);
+    } catch (err) {
+      console.error('Error fetching reviews:', err.response?.data || err.message);
+    }
+  }, [token, authHeaders]);
+
+  // Return requests only for delivered orders
+  const fetchReturnRequests = useCallback(async () => {
+    if (!token) return;
+    const requests = {};
+    for (const order of orders) {
+      if (getStatusKey(order) !== 'delivered') continue;
+      try {
+        const res = await axios.get(`${API_URL}/returns/order/${order._id}`, {
+          headers: authHeaders(),
+          validateStatus: (s) => s < 500,
+        });
+        if (res.status === 200 && res.data?.success) {
+          const rd = res.data.data || res.data.returns || res.data;
+          if (rd && (!Array.isArray(rd) || rd.length > 0)) requests[order._id] = rd;
+        }
+      } catch (err) {
+        console.log(`Could not load returns for order ${order._id}:`, err.message);
+      }
+    }
+    setReturnRequests(requests);
+  }, [orders, token, authHeaders]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !token) {
+      navigate('/login');
+    } else {
+      fetchOrders();
+      fetchUserReviews();
+    }
+  }, [isAuthenticated, token, navigate, fetchOrders, fetchUserReviews]);
+
+  useEffect(() => {
+    if (orders.length > 0 && token && isAuthenticated) fetchReturnRequests();
+  }, [orders, token, isAuthenticated, fetchReturnRequests]);
+
+  /* ---------------- actions ---------------- */
+  // REORDER: all items go to cart again, then user continues to checkout
+  const handleReorder = async (order) => {
+    setReorderingId(order._id);
+    let added = 0;
+    let failed = 0;
+
+    for (const item of order.orderItems || []) {
+      const pid = getProductId(item);
+      if (!pid) {
+        failed += 1;
+        continue;
+      }
+      try {
+        await addToCart(pid, item.qty || 1);
+        added += 1;
+      } catch (err) {
+        console.error('Reorder failed for', item.name, err);
+        failed += 1;
+      }
+    }
+
+    setReorderingId(null);
+
+    if (added > 0) {
+      window.dispatchEvent(new Event('cartUpdated'));
+      showToast(
+        failed > 0
+          ? `${added} item(s) added to cart, ${failed} unavailable`
+          : `${added} item(s) added to cart`,
+        failed > 0 ? 'warning' : 'success'
+      );
+      setDetailsOrderId(null);
+      setTimeout(() => navigate('/cart'), 900);
+    } else {
+      showToast('Could not reorder. Items may be out of stock.', 'error');
+    }
+  };
+
+  // NEED HELP: opens the chatbot with this order's context
+  const handleNeedHelp = (order) => {
+    const number = order._id?.slice(-8).toUpperCase();
+    const statusText = STATUS_META[getStatusKey(order)].text;
+    window.dispatchEvent(
+      new CustomEvent('openChatbot', {
+        detail: {
+          source: 'order-history',
+          orderId: order._id,
+          orderNumber: number,
+          status: statusText,
+          message: `Hi, I need help with my order #${number} (${statusText}).`,
+        },
+      })
+    );
+    showToast('Opening support chat...', 'info');
+  };
+
+  const handleReviewClick = (order, item) => {
+    setSelectedOrder(order);
+    setSelectedProduct({ ...item, productId: getProductId(item), product: item.product });
+    setShowReviewModal(true);
+  };
+
+  const handleReviewSuccess = async () => {
+    // review is saved in backend by the modal; reload so the real review shows up
+    await fetchUserReviews();
+    showToast('Thank you for your review!', 'success');
+  };
+
+  const handleReturnClick = (order, item) => {
+    setSelectedOrder(order);
+    setSelectedProduct({ ...item, productId: getProductId(item) });
+    setShowReturnModal(true);
+  };
+
+  const handleReturnSuccess = async () => {
+    await fetchReturnRequests();
+    showToast('Return request submitted successfully!', 'info');
+  };
+
+  const closeActionModals = () => {
+    setShowReviewModal(false);
+    setShowReturnModal(false);
+    setSelectedProduct(null);
+    setSelectedOrder(null);
+  };
+
+  /* ---------------- return helpers ---------------- */
+  const getItemReturnStatus = (orderId, productId) => {
+    try {
+      const rr = returnRequests[orderId];
+      if (!rr) return null;
+      const arr = Array.isArray(rr) ? rr : [rr];
+      const found = arr.find((r) =>
+        r.items?.some((i) => String(i.product?._id || i.product) === String(productId))
+      );
+      if (!found) return null;
+      return {
+        status: found.status || 'pending',
+        requestDate: found.createdAt || found.requestedAt,
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  const isReturnEligible = (order) => {
+    if (getStatusKey(order) !== 'delivered') return false;
+    const date = order.deliveredAt || order.createdAt;
+    if (!date) return false;
+    const days = (Date.now() - new Date(date).getTime()) / 86400000;
+    return days <= RETURN_WINDOW_DAYS;
+  };
+
+  /* ---------------- derived data ---------------- */
+  const keyOf = (o) => getStatusKey(o);
+  const stats = {
+    delivered: orders.filter((o) => keyOf(o) === 'delivered').length,
+    outForDelivery: orders.filter((o) => keyOf(o) === 'out-for-delivery').length,
+    pending: orders.filter((o) => ['pending', 'processing'].includes(keyOf(o))).length,
+    totalSpent: orders
+      .filter((o) => keyOf(o) !== 'cancelled')
+      .reduce((sum, o) => sum + (o.totalPrice || 0), 0),
+  };
+
+  const tabs = [
+    { id: 'all', label: 'All', count: orders.length },
+    { id: 'active', label: 'In progress', count: orders.filter((o) => ACTIVE_KEYS.includes(keyOf(o))).length },
+    { id: 'delivered', label: 'Delivered', count: stats.delivered },
+    { id: 'cancelled', label: 'Cancelled', count: orders.filter((o) => keyOf(o) === 'cancelled').length },
+  ];
+
+  const filteredOrders = orders.filter((o) => {
+    if (filter === 'all') return true;
+    if (filter === 'active') return ACTIVE_KEYS.includes(keyOf(o));
+    return keyOf(o) === filter;
+  });
+
+  const detailsOrder = orders.find((o) => o._id === detailsOrderId);
+
+  /* ---------------- early returns ---------------- */
+  const pageStyle = {
+    minHeight: '100vh',
+    background: colors.bgPrimary,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'column',
+    gap: '20px',
+    padding: '20px',
+  };
+
+  if (!isAuthenticated || !token) {
+    return (
+      <div style={pageStyle}>
+        <style>{css}</style>
+        <AlertCircle size={50} color={colors.error} />
+        <h2 style={{ color: colors.textPrimary }}>Authentication Required</h2>
+        <p style={{ color: colors.textSecondary }}>Please log in to view your orders.</p>
+        <button className="oh-btn solid lg" onClick={() => navigate('/login')}>
+          Go to Login
+        </button>
+      </div>
+    );
+  }
+
+  if (loading && orders.length === 0) {
+    return (
+      <div style={pageStyle}>
+        <style>{css}</style>
+        <Loader size={50} color={colors.primary} className="oh-spin" />
+        <p style={{ color: colors.textSecondary, fontSize: '1.1rem' }}>Loading your orders...</p>
+      </div>
+    );
+  }
+
+  const toastColor = {
+    success: colors.success,
+    error: colors.error,
+    warning: colors.warning,
+    info: colors.info,
+  }[toast.type];
+
+  const statCards = [
+    { label: 'Delivered', value: stats.delivered, icon: CheckCircle, color: colors.success },
+    { label: 'Out for Delivery', value: stats.outForDelivery, icon: Truck, color: colors.pink },
+    { label: 'Pending', value: stats.pending, icon: Clock, color: colors.warning },
+  ];
+
+  /* ---------------- render ---------------- */
+  return (
+    <div style={{ minHeight: '100vh', background: colors.bgPrimary, padding: '40px 20px', position: 'relative' }}>
+      <style>{css}</style>
+
+      <div
+        style={{
+          position: 'absolute',
+          inset: 0,
+          background: `radial-gradient(circle at 20% 30%, ${colors.primary}10 0%, transparent 50%), radial-gradient(circle at 80% 70%, ${colors.primaryLight}10 0%, transparent 50%)`,
+          pointerEvents: 'none',
+        }}
+      />
+
+      {toast.show && (
+        <div className="oh-toast" style={{ background: toastColor }}>
+          {toast.type === 'error' || toast.type === 'warning' ? <AlertCircle size={20} /> : <CheckCircle size={20} />}
+          {toast.message}
+        </div>
+      )}
+
+      <div style={{ maxWidth: '1200px', margin: '0 auto', position: 'relative', zIndex: 2 }}>
+        {/* Header */}
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: '28px',
+            flexWrap: 'wrap',
+            gap: '20px',
+          }}
+        >
+          <div>
+            <h1
+              style={{
+                fontSize: '2.4rem',
+                fontWeight: 800,
+                margin: '0 0 10px',
+                background: `linear-gradient(135deg, ${colors.textPrimary}, ${colors.primary})`,
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+              }}
+            >
+              Order History
+            </h1>
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+              <span className="oh-badge" style={{ background: colors.white, color: colors.textSecondary, borderColor: colors.border }}>
+                <ShoppingBag size={16} color={colors.primary} />
+                {orders.length} {orders.length === 1 ? 'Order' : 'Orders'}
+              </span>
+              {stats.totalSpent > 0 && (
+                <span className="oh-badge" style={{ background: colors.white, color: colors.textSecondary, borderColor: colors.border }}>
+                  <IndianRupee size={16} color={colors.primary} />
+                  Total Spent: {formatMoney(stats.totalSpent)}
+                </span>
+              )}
+              <button
+                className="oh-btn"
+                style={{ borderColor: colors.border, color: colors.textSecondary, padding: '5px 14px' }}
+                onClick={() => {
+                  fetchOrders();
+                  fetchUserReviews();
+                }}
+              >
+                <RefreshCw size={15} className={loading ? 'oh-spin' : ''} /> Refresh
+              </button>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: '15px', flexWrap: 'wrap' }}>
+            {statCards.map(({ label, value, icon: Icon, color }) => (
+              <div
+                key={label}
+                style={{
+                  background: colors.white,
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: '16px',
+                  padding: '12px 20px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                }}
+              >
+                <div
+                  style={{
+                    width: '40px',
+                    height: '40px',
+                    background: colors.bgSecondary,
+                    borderRadius: '12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    border: `1px solid ${colors.border}`,
+                  }}
+                >
+                  <Icon size={20} color={color} />
+                </div>
+                <div>
+                  <div style={{ fontSize: '0.8rem', color: colors.textLight }}>{label}</div>
+                  <div style={{ fontSize: '1.3rem', fontWeight: 700, color: colors.textPrimary }}>{value}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {error && (
+          <div
+            style={{
+              background: `${colors.error}10`,
+              border: `1px solid ${colors.error}`,
+              borderRadius: '16px',
+              padding: '20px',
+              marginBottom: '30px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+            }}
+          >
+            <AlertCircle size={24} color={colors.error} />
+            <span style={{ color: colors.error }}>{error}</span>
+            <button className="oh-btn" style={{ marginLeft: 'auto', borderColor: colors.error, color: colors.error }} onClick={fetchOrders}>
+              Retry
+            </button>
+          </div>
+        )}
+
+        {/* Filter tabs */}
+        {orders.length > 0 && (
+          <div className="oh-tabs">
+            {tabs.map((t) => (
+              <button key={t.id} className={`oh-tab ${filter === t.id ? 'active' : ''}`} onClick={() => setFilter(t.id)}>
+                {t.label} <span className="oh-tab-count">{t.count}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {!error && orders.length === 0 ? (
+          <div
+            style={{
+              background: colors.white,
+              border: `1px solid ${colors.border}`,
+              borderRadius: '32px',
+              padding: '60px 20px',
+              maxWidth: '500px',
+              margin: '40px auto',
+              textAlign: 'center',
+            }}
+          >
+            <Package size={80} color={colors.primary} />
+            <h3 style={{ color: colors.textPrimary, fontSize: '1.8rem', margin: '20px 0 12px' }}>No Orders Yet</h3>
+            <p style={{ color: colors.textSecondary, marginBottom: '30px' }}>
+              Looks like you haven't placed any orders yet. Start shopping to see your orders here!
+            </p>
+            <Link to="/shop" className="oh-btn solid lg">
+              <ShoppingBag size={18} /> Start Shopping
+            </Link>
+          </div>
+        ) : filteredOrders.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '50px', color: colors.textSecondary }}>
+            No orders in this tab.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            {filteredOrders.map((order, index) => {
+              const statusKey = getStatusKey(order);
+              const isDelivered = statusKey === 'delivered';
+              const eligible = isReturnEligible(order);
+
+              return (
+                <div key={order._id} className="oh-card" style={{ animationDelay: `${index * 0.06}s` }}>
+                  <div style={{ padding: '24px' }}>
+                    {/* Header */}
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'flex-start',
+                        marginBottom: '20px',
+                        flexWrap: 'wrap',
+                        gap: '15px',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                        <div
+                          style={{
+                            width: '50px',
+                            height: '50px',
+                            background: colors.bgSecondary,
+                            borderRadius: '15px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            border: `1px solid ${colors.border}`,
+                          }}
+                        >
+                          <Package size={24} color={colors.primary} />
+                        </div>
+                        <div>
+                          <h3 style={{ fontSize: '1.15rem', fontWeight: 600, color: colors.textPrimary, margin: '0 0 6px' }}>
+                            Order #{order._id?.slice(-8).toUpperCase()}
+                          </h3>
+                          <StatusBadge statusKey={statusKey} />
+                        </div>
+                      </div>
+
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: '1.5rem', fontWeight: 700, color: colors.primary }}>
+                          {formatMoney(order.totalPrice)}
+                        </div>
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'flex-end',
+                            gap: '5px',
+                            color: colors.textLight,
+                            fontSize: '0.88rem',
+                          }}
+                        >
+                          <Calendar size={14} />
+                          {formatDate(order.createdAt)} at {formatTime(order.createdAt)}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Progress */}
+                    <OrderStepper statusKey={statusKey} />
+
+                    {/* All products (no "Show All") */}
+                    <h4 style={{ fontSize: '0.95rem', fontWeight: 600, color: colors.textSecondary, margin: '0 0 12px' }}>
+                      Items ({order.orderItems?.length || 0})
+                    </h4>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      {(order.orderItems || []).map((item, i) => {
+                        const pid = getProductId(item);
+                        return (
+                          <OrderItemRow
+                            key={i}
+                            item={item}
+                            review={userReviews[pid]}
+                            returnStatus={getItemReturnStatus(order._id, pid)}
+                            isDelivered={isDelivered}
+                            returnEligible={eligible}
+                            onReview={() => handleReviewClick(order, item)}
+                            onReturn={() => handleReturnClick(order, item)}
+                          />
+                        );
+                      })}
+                    </div>
+
+                    {/* Footer actions */}
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        flexWrap: 'wrap',
+                        gap: '12px',
+                        marginTop: '20px',
+                        paddingTop: '20px',
+                        borderTop: `1px solid ${colors.border}`,
+                      }}
+                    >
+                      <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                        <button
+                          className="oh-btn"
+                          onClick={() => handleReorder(order)}
+                          disabled={reorderingId === order._id}
+                        >
+                          {reorderingId === order._id ? (
+                            <Loader size={15} className="oh-spin" />
+                          ) : (
+                            <RotateCcw size={15} />
+                          )}
+                          Reorder
+                        </button>
+                        <button className="oh-btn" onClick={() => handleNeedHelp(order)}>
+                          <MessageCircle size={15} /> Need Help?
+                        </button>
+                      </div>
+
+                      <button className="oh-btn solid lg" onClick={() => setDetailsOrderId(order._id)}>
+                        View Details <ChevronRight size={16} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Order details with full product details */}
+      {detailsOrder && (
+        <OrderDetailsModal
+          order={detailsOrder}
+          reviews={userReviews}
+          reordering={reorderingId === detailsOrder._id}
+          onClose={() => setDetailsOrderId(null)}
+          onReorder={handleReorder}
+          onHelp={handleNeedHelp}
+        />
+      )}
+
+      {/* Review modal (saves review in backend) */}
+      {showReviewModal && selectedProduct && selectedOrder && (
+        <ProductReviewModal
+          product={{ ...selectedProduct, _id: selectedProduct.productId || selectedProduct.product }}
+          order={selectedOrder}
+          onClose={closeActionModals}
+          onSuccess={handleReviewSuccess}
+          onError={(msg) => showToast(msg || 'Failed to submit review', 'error')}
+        />
+      )}
+
+      {/* Return modal */}
+      {showReturnModal && selectedProduct && selectedOrder && (
+        <ReturnRequestModal
+          product={selectedProduct}
+          order={selectedOrder}
+          onClose={closeActionModals}
+          onSuccess={handleReturnSuccess}
+          onError={(msg) => showToast(msg || 'Failed to submit return', 'error')}
+        />
+      )}
+    </div>
+  );
 };
 
 export default OrderHistory;
