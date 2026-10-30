@@ -4,6 +4,16 @@ import { ShoppingBag, ArrowRight, ChevronLeft, ChevronRight, Star, Truck, Shield
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 
+// Items shown in the moving news-style ticker
+const TICKER_ITEMS = [
+  { icon: Truck, title: 'Free Shipping', desc: 'On orders ₹5000+' },
+  { icon: Shield, title: 'Secure Payment', desc: '100% Protected' },
+  { icon: Clock, title: '24/7 Support', desc: 'Dedicated Help' },
+];
+
+// Repeat the items so one group is always wider than the screen (seamless loop)
+const TICKER_GROUP = [...TICKER_ITEMS, ...TICKER_ITEMS, ...TICKER_ITEMS];
+
 const HeroBanner = () => {
   const navigate = useNavigate();
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -22,30 +32,44 @@ const HeroBanner = () => {
   // Function to get full image URL
   const getFullImageUrl = (imagePath) => {
     if (!imagePath) return '';
-    
-    // If it's already a full URL with localhost, return as is
+
     if (imagePath.includes('localhost') || imagePath.startsWith('http')) {
       return imagePath;
     }
-    
-    // If it starts with /uploads
     if (imagePath.startsWith('/uploads')) {
       return `${BASE_URL}${imagePath}`;
     }
-    
-    // If it's just the filename
     if (imagePath.startsWith('banner-')) {
       return `${BASE_URL}/uploads/${imagePath}`;
     }
-    
-    // For Unsplash URLs or other external images
     if (imagePath.includes('unsplash.com') || imagePath.includes('images.unsplash.com')) {
       return imagePath;
     }
-    
-    // Default: assume it's a filename in uploads
     return `${BASE_URL}/uploads/${imagePath}`;
   };
+
+  // Helper function to adjust color brightness
+  function adjustColor(hex, percent) {
+    if (!hex) return '#B8962E';
+
+    let R = parseInt(hex.substring(1, 3), 16);
+    let G = parseInt(hex.substring(3, 5), 16);
+    let B = parseInt(hex.substring(5, 7), 16);
+
+    R = parseInt((R * (100 + percent)) / 100);
+    G = parseInt((G * (100 + percent)) / 100);
+    B = parseInt((B * (100 + percent)) / 100);
+
+    R = R < 255 ? R : 255;
+    G = G < 255 ? G : 255;
+    B = B < 255 ? B : 255;
+
+    const RR = R.toString(16).length === 1 ? '0' + R.toString(16) : R.toString(16);
+    const GG = G.toString(16).length === 1 ? '0' + G.toString(16) : G.toString(16);
+    const BB = B.toString(16).length === 1 ? '0' + B.toString(16) : B.toString(16);
+
+    return '#' + RR + GG + BB;
+  }
 
   // Color scheme based on theme color from admin panel
   const colors = {
@@ -59,33 +83,6 @@ const HeroBanner = () => {
     white: '#FFFFFF',
   };
 
-  // Helper function to adjust color brightness
-  function adjustColor(hex, percent) {
-    if (!hex) return '#B8962E';
-    
-    // Convert hex to RGB
-    let R = parseInt(hex.substring(1,3), 16);
-    let G = parseInt(hex.substring(3,5), 16);
-    let B = parseInt(hex.substring(5,7), 16);
-
-    // Adjust brightness
-    R = parseInt(R * (100 + percent) / 100);
-    G = parseInt(G * (100 + percent) / 100);
-    B = parseInt(B * (100 + percent) / 100);
-
-    // Ensure values are within range
-    R = (R < 255) ? R : 255;
-    G = (G < 255) ? G : 255;
-    B = (B < 255) ? B : 255;
-
-    // Convert back to hex
-    const RR = ((R.toString(16).length === 1) ? "0" + R.toString(16) : R.toString(16));
-    const GG = ((G.toString(16).length === 1) ? "0" + G.toString(16) : G.toString(16));
-    const BB = ((B.toString(16).length === 1) ? "0" + B.toString(16) : B.toString(16));
-
-    return "#" + RR + GG + BB;
-  }
-
   // Fetch slides from backend
   useEffect(() => {
     fetchHeroBannerData();
@@ -94,39 +91,28 @@ const HeroBanner = () => {
   const fetchHeroBannerData = async () => {
     try {
       setLoading(true);
-      console.log('📦 Fetching hero banner from:', `${API_URL}/hero-banner`);
-      
-      // Try to fetch from backend
+
       try {
         const response = await axios.get(`${API_URL}/hero-banner`);
-        console.log('📥 Hero banner response:', response.data);
-        
+
         if (response.data && response.data.success) {
-          // Filter only active slides and process image URLs
           const activeSlides = response.data.data
-            .filter(slide => slide.active !== false)
-            .map(slide => {
-              const fullImageUrl = getFullImageUrl(slide.image);
-              console.log(`Slide ${slide.title} image URL:`, fullImageUrl);
-              return {
-                ...slide,
-                fullImageUrl: fullImageUrl
-              };
-            });
-          
-          console.log('✅ Processed slides:', activeSlides);
+            .filter((slide) => slide.active !== false)
+            .map((slide) => ({
+              ...slide,
+              fullImageUrl: getFullImageUrl(slide.image),
+            }));
+
           setSlides(activeSlides);
           setThemeColor(response.data.themeColor || '#D4AF37');
           setError(null);
         } else {
-          // If response format is different, use default slides
-          console.log('Using default slides - no data from backend');
           setSlides(getDefaultSlides());
         }
       } catch (err) {
         console.log('Backend not available, using default slides');
         setSlides(getDefaultSlides());
-        setError(null); // Don't show error to user
+        setError(null);
       }
     } catch (err) {
       console.error('Error in hero banner:', err);
@@ -147,7 +133,7 @@ const HeroBanner = () => {
       highlight: 'Up to 50% Off',
       category: 'fashion',
       active: true,
-      fullImageUrl: 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?ixlib=rb-4.0.3&auto=format&fit=crop&w=1200&q=80'
+      fullImageUrl: 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?ixlib=rb-4.0.3&auto=format&fit=crop&w=1200&q=80',
     },
     {
       id: 2,
@@ -158,8 +144,8 @@ const HeroBanner = () => {
       highlight: 'Save ₹5000+',
       category: 'electronics',
       active: true,
-      fullImageUrl: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?ixlib=rb-4.0.3&auto=format&fit=crop&w=1200&q=80'
-    }
+      fullImageUrl: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?ixlib=rb-4.0.3&auto=format&fit=crop&w=1200&q=80',
+    },
   ];
 
   // Auto-slide functionality
@@ -175,30 +161,22 @@ const HeroBanner = () => {
     };
   }, [slides.length, autoPlay]);
 
-  // Pause auto-play on hover
   const handleMouseEnter = () => setAutoPlay(false);
   const handleMouseLeave = () => setAutoPlay(true);
 
   // Handle window resize
   useEffect(() => {
-    const handleResize = () => {
-      setWindowWidth(window.innerWidth);
-    };
-    
+    const handleResize = () => setWindowWidth(window.innerWidth);
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
   const nextSlide = () => {
-    if (slides.length > 0) {
-      setCurrentSlide((prev) => (prev + 1) % slides.length);
-    }
+    if (slides.length > 0) setCurrentSlide((prev) => (prev + 1) % slides.length);
   };
 
   const prevSlide = () => {
-    if (slides.length > 0) {
-      setCurrentSlide((prev) => (prev - 1 + slides.length) % slides.length);
-    }
+    if (slides.length > 0) setCurrentSlide((prev) => (prev - 1 + slides.length) % slides.length);
   };
 
   const handleShopNow = () => {
@@ -218,13 +196,8 @@ const HeroBanner = () => {
   };
 
   const handleImageError = (slide, imageUrl) => {
-    console.error(`❌ Image failed to load for slide:`, slide.title);
-    console.error('Failed URL:', imageUrl);
-    setImageErrors(prev => ({ ...prev, [slide._id || slide.id]: true }));
-  };
-
-  const handleImageLoad = (slide) => {
-    console.log(`✅ Image loaded successfully for slide:`, slide.title);
+    console.error('Image failed to load for slide:', slide.title, imageUrl);
+    setImageErrors((prev) => ({ ...prev, [slide._id || slide.id]: true }));
   };
 
   // Responsive breakpoints
@@ -248,7 +221,7 @@ const HeroBanner = () => {
       margin: '0 auto',
       borderRadius: isMobile ? '16px' : '24px',
       overflow: 'hidden',
-      boxShadow: `0 20px 40px rgba(0,0,0,0.1)`,
+      boxShadow: '0 20px 40px rgba(0,0,0,0.1)',
     },
     slide: {
       display: 'grid',
@@ -260,7 +233,8 @@ const HeroBanner = () => {
       transition: 'all 0.5s ease',
     },
     content: {
-      padding: isMobile ? '20px' : isTablet ? '30px' : '40px',
+      // extra left padding so the prev arrow never covers the text
+      padding: isMobile ? '20px' : isTablet ? '30px 30px 30px 70px' : '40px 40px 40px 80px',
       order: isMobile ? 1 : 0,
     },
     badge: {
@@ -347,7 +321,7 @@ const HeroBanner = () => {
       height: '100%',
       objectFit: 'cover',
       borderRadius: isMobile ? '16px' : '24px',
-      boxShadow: `0 20px 40px rgba(0,0,0,0.15)`,
+      boxShadow: '0 20px 40px rgba(0,0,0,0.15)',
     },
     floatingCard: {
       position: 'absolute',
@@ -357,7 +331,7 @@ const HeroBanner = () => {
       backdropFilter: 'blur(10px)',
       padding: isMobile ? '12px 15px' : '15px 20px',
       borderRadius: '12px',
-      boxShadow: `0 10px 30px rgba(0,0,0,0.15)`,
+      boxShadow: '0 10px 30px rgba(0,0,0,0.15)',
       display: 'flex',
       alignItems: 'center',
       gap: isMobile ? '10px' : '12px',
@@ -387,15 +361,11 @@ const HeroBanner = () => {
       justifyContent: 'center',
       cursor: 'pointer',
       zIndex: 10,
-      boxShadow: `0 4px 12px rgba(0,0,0,0.1)`,
+      boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
       transition: 'all 0.3s ease',
     },
-    prevButton: {
-      left: isMobile ? '10px' : '20px',
-    },
-    nextButton: {
-      right: isMobile ? '10px' : '20px',
-    },
+    prevButton: { left: isMobile ? '10px' : '20px' },
+    nextButton: { right: isMobile ? '10px' : '20px' },
     dots: {
       position: 'absolute',
       bottom: isMobile ? '10px' : '20px',
@@ -419,22 +389,42 @@ const HeroBanner = () => {
       width: isMobile ? '20px' : '25px',
       borderRadius: '12px',
     },
-    features: {
-      display: 'grid',
-      gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)',
-      gap: isMobile ? '10px' : '20px',
+
+    /* ---------- NEWS-STYLE MOVING TICKER ---------- */
+    ticker: {
       marginTop: isMobile ? '20px' : '30px',
-      padding: isMobile ? '15px' : '20px',
+      padding: isMobile ? '12px 0' : '16px 0',
       background: colors.white,
       borderRadius: '16px',
       border: `1px solid ${colors.border}`,
+      overflow: 'hidden',
+      position: 'relative',
+      // soft fade on left & right edges
+      WebkitMaskImage: 'linear-gradient(to right, transparent, #000 6%, #000 94%, transparent)',
+      maskImage: 'linear-gradient(to right, transparent, #000 6%, #000 94%, transparent)',
     },
-    feature: {
+    tickerTrack: {
+      display: 'flex',
+      width: 'max-content',
+    },
+    tickerGroup: {
+      display: 'flex',
+      flexShrink: 0,
+      alignItems: 'center',
+    },
+    tickerItem: {
       display: 'flex',
       alignItems: 'center',
       gap: isMobile ? '10px' : '12px',
-      padding: isMobile ? '10px' : '0',
-      justifyContent: isMobile ? 'flex-start' : 'center',
+      padding: isMobile ? '0 24px' : '0 48px',
+      whiteSpace: 'nowrap',
+    },
+    tickerSeparator: {
+      width: '6px',
+      height: '6px',
+      borderRadius: '50%',
+      background: colors.primary,
+      flexShrink: 0,
     },
     featureIcon: {
       width: isMobile ? '35px' : '40px',
@@ -445,6 +435,7 @@ const HeroBanner = () => {
       alignItems: 'center',
       justifyContent: 'center',
       color: colors.primary,
+      flexShrink: 0,
     },
     loadingContainer: {
       display: 'flex',
@@ -473,7 +464,7 @@ const HeroBanner = () => {
       borderRadius: '8px',
       cursor: 'pointer',
       fontSize: '1rem',
-    }
+    },
   };
 
   if (loading) {
@@ -491,10 +482,7 @@ const HeroBanner = () => {
       <section style={styles.hero}>
         <div style={styles.errorContainer}>
           <div>Unable to load banner</div>
-          <button 
-            style={styles.retryButton}
-            onClick={fetchHeroBannerData}
-          >
+          <button style={styles.retryButton} onClick={fetchHeroBannerData}>
             Retry
           </button>
         </div>
@@ -504,17 +492,36 @@ const HeroBanner = () => {
 
   const currentSlideData = slides[currentSlide];
 
+  // One group of ticker items (rendered twice for a seamless loop)
+  const renderTickerGroup = (groupKey, hidden = false) => (
+    <div style={styles.tickerGroup} aria-hidden={hidden}>
+      {TICKER_GROUP.map((item, i) => (
+        <React.Fragment key={`${groupKey}-${i}`}>
+          <div style={styles.tickerItem}>
+            <div style={styles.featureIcon}>
+              <item.icon size={isMobile ? 18 : 20} />
+            </div>
+            <div>
+              <div style={{ fontWeight: '600', color: colors.textPrimary }}>{item.title}</div>
+              <div style={{ fontSize: isMobile ? '0.75rem' : '0.85rem', color: colors.textSecondary }}>
+                {item.desc}
+              </div>
+            </div>
+          </div>
+          <span style={styles.tickerSeparator} />
+        </React.Fragment>
+      ))}
+    </div>
+  );
+
   return (
     <section style={styles.hero}>
-      <div 
-        style={styles.sliderContainer}
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
-      >
+      <div style={styles.sliderContainer} onMouseEnter={handleMouseEnter} onMouseLeave={handleMouseLeave}>
         {/* Navigation Buttons */}
-        <button 
-          style={{...styles.navButton, ...styles.prevButton}}
+        <button
+          style={{ ...styles.navButton, ...styles.prevButton }}
           onClick={prevSlide}
+          aria-label="Previous slide"
           onMouseEnter={(e) => {
             e.currentTarget.style.background = colors.primary;
             e.currentTarget.style.color = colors.white;
@@ -526,10 +533,11 @@ const HeroBanner = () => {
         >
           <ChevronLeft size={isMobile ? 18 : 22} />
         </button>
-        
-        <button 
-          style={{...styles.navButton, ...styles.nextButton}}
+
+        <button
+          style={{ ...styles.navButton, ...styles.nextButton }}
           onClick={nextSlide}
+          aria-label="Next slide"
           onMouseEnter={(e) => {
             e.currentTarget.style.background = colors.primary;
             e.currentTarget.style.color = colors.white;
@@ -546,34 +554,32 @@ const HeroBanner = () => {
         <div style={styles.slide}>
           <div style={styles.content}>
             <span style={styles.badge}>{currentSlideData.badge}</span>
-            <h1 style={styles.title}>
-              {currentSlideData.title}
-            </h1>
+            <h1 style={styles.title}>{currentSlideData.title}</h1>
             <p style={styles.subtitle}>{currentSlideData.subtitle}</p>
             <div style={styles.highlight}>{currentSlideData.highlight}</div>
-            
+
             <div style={styles.buttonGroup}>
-              <button 
+              <button
                 style={styles.primaryButton}
                 onClick={handleShopNow}
-                onMouseEnter={(e) => e.target.style.background = adjustColor(colors.primary, -10)}
-                onMouseLeave={(e) => e.target.style.background = colors.primary}
+                onMouseEnter={(e) => (e.currentTarget.style.background = adjustColor(colors.primary, -10))}
+                onMouseLeave={(e) => (e.currentTarget.style.background = colors.primary)}
               >
                 Shop Now <ShoppingBag size={isMobile ? 16 : 18} />
               </button>
-              
-              <button 
+
+              <button
                 style={styles.secondaryButton}
                 onClick={handleLearnMore}
                 onMouseEnter={(e) => {
-                  e.target.style.background = colors.primary;
-                  e.target.style.color = colors.white;
-                  e.target.style.borderColor = colors.primary;
+                  e.currentTarget.style.background = colors.primary;
+                  e.currentTarget.style.color = colors.white;
+                  e.currentTarget.style.borderColor = colors.primary;
                 }}
                 onMouseLeave={(e) => {
-                  e.target.style.background = 'transparent';
-                  e.target.style.color = colors.textPrimary;
-                  e.target.style.borderColor = colors.border;
+                  e.currentTarget.style.background = 'transparent';
+                  e.currentTarget.style.color = colors.textPrimary;
+                  e.currentTarget.style.borderColor = colors.border;
                 }}
               >
                 Learn More <ArrowRight size={isMobile ? 16 : 18} />
@@ -582,20 +588,18 @@ const HeroBanner = () => {
           </div>
 
           <div style={styles.imageContainer}>
-            <img 
+            <img
               src={currentSlideData.fullImageUrl || currentSlideData.image}
               alt={currentSlideData.title}
               style={styles.image}
               loading="lazy"
               onError={(e) => {
-                console.error('Image failed to load:', e.target.src);
                 handleImageError(currentSlideData, e.target.src);
-                // Try fallback to Unsplash if local image fails
-                if (!currentSlideData.image.includes('unsplash.com')) {
-                  e.target.src = 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?ixlib=rb-4.0.3&auto=format&fit=crop&w=1200&q=80';
+                if (!currentSlideData.image?.includes('unsplash.com')) {
+                  e.target.src =
+                    'https://images.unsplash.com/photo-1441986300917-64674bd600d8?ixlib=rb-4.0.3&auto=format&fit=crop&w=1200&q=80';
                 }
               }}
-              onLoad={() => handleImageLoad(currentSlideData)}
             />
 
             <div style={styles.floatingCard}>
@@ -617,64 +621,48 @@ const HeroBanner = () => {
           {slides.map((_, index) => (
             <button
               key={index}
+              aria-label={`Go to slide ${index + 1}`}
               style={{
                 ...styles.dot,
-                ...(currentSlide === index ? styles.activeDot : {})
+                ...(currentSlide === index ? styles.activeDot : {}),
               }}
               onClick={() => setCurrentSlide(index)}
               onMouseEnter={(e) => {
-                if (currentSlide !== index) {
-                  e.target.style.background = colors.primary;
-                }
+                if (currentSlide !== index) e.currentTarget.style.background = colors.primary;
               }}
               onMouseLeave={(e) => {
-                if (currentSlide !== index) {
-                  e.target.style.background = colors.border;
-                }
+                if (currentSlide !== index) e.currentTarget.style.background = colors.border;
               }}
             />
           ))}
         </div>
       </div>
 
-      {/* Features Section */}
-      <div style={styles.features}>
-        <div style={styles.feature}>
-          <div style={styles.featureIcon}>
-            <Truck size={isMobile ? 18 : 20} />
-          </div>
-          <div>
-            <div style={{ fontWeight: '600', color: colors.textPrimary }}>Free Shipping</div>
-            <div style={{ fontSize: isMobile ? '0.75rem' : '0.85rem', color: colors.textSecondary }}>
-              On orders ₹5000+
-            </div>
-          </div>
-        </div>
-
-        <div style={styles.feature}>
-          <div style={styles.featureIcon}>
-            <Shield size={isMobile ? 18 : 20} />
-          </div>
-          <div>
-            <div style={{ fontWeight: '600', color: colors.textPrimary }}>Secure Payment</div>
-            <div style={{ fontSize: isMobile ? '0.75rem' : '0.85rem', color: colors.textSecondary }}>
-              100% Protected
-            </div>
-          </div>
-        </div>
-
-        <div style={styles.feature}>
-          <div style={styles.featureIcon}>
-            <Clock size={isMobile ? 18 : 20} />
-          </div>
-          <div>
-            <div style={{ fontWeight: '600', color: colors.textPrimary }}>24/7 Support</div>
-            <div style={{ fontSize: isMobile ? '0.75rem' : '0.85rem', color: colors.textSecondary }}>
-              Dedicated Help
-            </div>
-          </div>
+      {/* Moving news-style ticker (pauses on hover) */}
+      <div className="hb-ticker" style={styles.ticker} role="marquee" aria-label="Store benefits">
+        <div className="hb-ticker-track" style={styles.tickerTrack}>
+          {renderTickerGroup('a')}
+          {renderTickerGroup('b', true)}
         </div>
       </div>
+
+      <style>{`
+        @keyframes hb-marquee {
+          from { transform: translateX(0); }
+          to   { transform: translateX(-50%); }
+        }
+        .hb-ticker-track {
+          animation: hb-marquee ${isMobile ? 25 : 35}s linear infinite;
+          will-change: transform;
+        }
+        .hb-ticker:hover .hb-ticker-track {
+          animation-play-state: paused;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .hb-ticker-track { animation: none; }
+          .hb-ticker { overflow-x: auto; }
+        }
+      `}</style>
     </section>
   );
 };
