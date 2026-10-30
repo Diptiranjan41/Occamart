@@ -10,10 +10,6 @@ import {
   Sparkles,
   Award,
   Zap,
-  Clock,
-  Shield,
-  Truck,
-  RefreshCw,
   CheckCircle,
   AlertCircle,
   Loader,
@@ -612,34 +608,6 @@ const FeaturedProducts = () => {
       marginTop: '10px',
     },
     addButtonDisabled: { opacity: 0.6, cursor: 'not-allowed' },
-    featuresBar: {
-      display: 'grid',
-      gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, 1fr)',
-      gap: '15px',
-      marginTop: '60px',
-      marginBottom: '40px',
-    },
-    featureItem: {
-      background: colors.white,
-      padding: '20px',
-      borderRadius: '16px',
-      border: `1px solid ${colors.border}`,
-      display: 'flex',
-      alignItems: 'center',
-      gap: '12px',
-    },
-    featureIcon: {
-      width: '45px',
-      height: '45px',
-      background: colors.bgSecondary,
-      borderRadius: '12px',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      flexShrink: 0,
-    },
-    featureTitle: { color: colors.textPrimary, fontSize: '0.95rem', fontWeight: '600', marginBottom: '2px' },
-    featureDesc: { color: colors.textLight, fontSize: '0.8rem' },
     pagination: {
       display: 'flex',
       justifyContent: 'center',
@@ -1025,27 +993,6 @@ const FeaturedProducts = () => {
                 </div>
               );
             })}
-          </div>
-        )}
-
-        {filteredProducts.length > 0 && (
-          <div style={styles.featuresBar}>
-            {[
-              { icon: Truck, title: 'Free Shipping', desc: 'On orders ₹5000+' },
-              { icon: RefreshCw, title: 'Easy Returns', desc: '30-day return policy' },
-              { icon: Shield, title: 'Secure Payment', desc: '256-bit SSL' },
-              { icon: Clock, title: '24/7 Support', desc: 'Dedicated help' },
-            ].map((feature) => (
-              <div key={feature.title} style={styles.featureItem}>
-                <div style={styles.featureIcon}>
-                  <feature.icon size={22} color={colors.primary} />
-                </div>
-                <div>
-                  <div style={styles.featureTitle}>{feature.title}</div>
-                  <div style={styles.featureDesc}>{feature.desc}</div>
-                </div>
-              </div>
-            ))}
           </div>
         )}
 
