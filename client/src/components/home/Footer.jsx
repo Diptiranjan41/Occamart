@@ -1,19 +1,16 @@
 import React, { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { 
-  Heart, 
-  ShoppingBag, 
-  Mail, 
-  Phone, 
-  MapPin, 
-  Facebook, 
-  Twitter, 
-  Instagram, 
+import { useNavigate } from 'react-router-dom';
+import {
+  Heart,
+  ShoppingBag,
+  Mail,
+  Phone,
+  MapPin,
+  Facebook,
+  Twitter,
+  Instagram,
   Youtube,
   Github,
-  Shield,
-  Truck,
-  RefreshCw,
   ChevronRight,
   Award,
   Clock,
@@ -29,7 +26,7 @@ import {
 
 const Footer = () => {
   const navigate = useNavigate();
-  const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
+  const [currentYear] = useState(new Date().getFullYear());
   const [windowWidth, setWindowWidth] = useState(typeof window !== 'undefined' ? window.innerWidth : 1200);
 
   // Professional Color Scheme
@@ -55,7 +52,7 @@ const Footer = () => {
     const handleResize = () => {
       setWindowWidth(window.innerWidth);
     };
-    
+
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
@@ -80,7 +77,7 @@ const Footer = () => {
           transform: translateY(0);
         }
       }
-      
+
       @keyframes slideInFromLeft {
         from {
           opacity: 0;
@@ -91,7 +88,7 @@ const Footer = () => {
           transform: translateX(0);
         }
       }
-      
+
       @keyframes slideInFromRight {
         from {
           opacity: 0;
@@ -102,13 +99,13 @@ const Footer = () => {
           transform: translateX(0);
         }
       }
-      
+
       @keyframes pulse {
         0% { transform: scale(1); }
         50% { transform: scale(1.05); }
         100% { transform: scale(1); }
       }
-      
+
       .footer-link {
         position: relative;
         transition: all 0.3s ease;
@@ -120,7 +117,7 @@ const Footer = () => {
         gap: 8px;
         cursor: pointer;
       }
-      
+
       .footer-link::after {
         content: '';
         position: absolute;
@@ -131,101 +128,83 @@ const Footer = () => {
         background: ${colors.primary};
         transition: width 0.3s ease;
       }
-      
+
       .footer-link:hover {
         color: ${colors.primary};
         transform: translateX(5px);
       }
-      
+
       .footer-link:hover::after {
         width: 100%;
       }
-      
+
       .social-icon {
         transition: all 0.3s ease;
         cursor: pointer;
       }
-      
+
       .social-icon:hover {
         transform: translateY(-5px);
         color: ${colors.primary};
       }
-      
-      .feature-card {
-        transition: all 0.3s ease;
-        animation: fadeInUp 0.6s ease-out;
-      }
-      
-      .feature-card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 10px 30px rgba(212, 175, 55, 0.1);
-      }
-      
+
       .payment-icon {
         transition: all 0.3s ease;
       }
-      
+
       .payment-icon:hover {
         transform: scale(1.1);
         color: ${colors.primary};
       }
-      
+
       /* Mobile Styles */
       @media (max-width: 768px) {
         .footer-grid {
           grid-template-columns: 1fr !important;
           gap: 1.5rem !important;
         }
-        
+
         .footer-section {
           text-align: center;
         }
-        
+
         .footer-links-container {
           display: grid;
           grid-template-columns: repeat(2, 1fr);
           gap: 1rem;
         }
-        
+
         .footer-contact-item {
           justify-content: center;
         }
-        
+
         .footer-social-links {
           justify-content: center;
         }
-        
-        .footer-features {
-          grid-template-columns: repeat(2, 1fr) !important;
-        }
-        
+
         .footer-bottom {
           flex-direction: column;
           gap: 1rem;
           text-align: center;
         }
-        
+
         .footer-payment-methods {
           justify-content: center;
         }
       }
-      
+
       /* Tablet Styles */
       @media (min-width: 769px) and (max-width: 1024px) {
         .footer-grid {
           grid-template-columns: repeat(2, 1fr) !important;
           gap: 2rem !important;
         }
-        
+
         .footer-links-container {
           grid-template-columns: repeat(2, 1fr);
         }
-        
-        .footer-features {
-          grid-template-columns: repeat(4, 1fr) !important;
-        }
       }
-      
+
       /* Desktop Styles */
       @media (min-width: 1025px) and (max-width: 1400px) {
         .footer-grid {
@@ -233,18 +212,18 @@ const Footer = () => {
           gap: 2rem !important;
         }
       }
-      
+
       /* Large Screen Styles */
       @media (min-width: 1401px) {
         .footer-container {
           max-width: 1400px !important;
         }
-        
+
         .footer-grid {
           grid-template-columns: repeat(4, 1fr) !important;
           gap: 3rem !important;
         }
-        
+
         .footer-link {
           font-size: 1rem !important;
         }
@@ -282,55 +261,6 @@ const Footer = () => {
       padding: windowWidth <= 480 ? '0 20px' : '0 30px',
       position: 'relative',
       zIndex: 2,
-    },
-    // Features Bar
-    featuresBar: {
-      display: 'grid',
-      gridTemplateColumns: windowWidth <= 768 
-        ? 'repeat(2, 1fr)' 
-        : windowWidth <= 1024 
-          ? 'repeat(4, 1fr)' 
-          : 'repeat(4, 1fr)',
-      gap: windowWidth <= 480 ? '10px' : '20px',
-      marginBottom: windowWidth <= 768 ? '30px' : '50px',
-      padding: windowWidth <= 768 ? '15px' : '20px',
-      background: colors.bgSecondary,
-      borderRadius: '16px',
-      border: `1px solid ${colors.border}`,
-    },
-    featureCard: {
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: windowWidth <= 768 ? 'center' : 'flex-start',
-      gap: windowWidth <= 480 ? '8px' : '12px',
-      padding: windowWidth <= 480 ? '10px' : '15px',
-      borderRadius: '12px',
-      background: colors.white,
-      boxShadow: '0 2px 8px rgba(0,0,0,0.02)',
-      cursor: 'pointer',
-    },
-    featureIcon: {
-      width: windowWidth <= 480 ? '32px' : '40px',
-      height: windowWidth <= 480 ? '32px' : '40px',
-      background: `${colors.primary}15`,
-      borderRadius: '10px',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      color: colors.primary,
-    },
-    featureText: {
-      display: windowWidth <= 768 && windowWidth > 480 ? 'none' : 'block',
-    },
-    featureTitle: {
-      fontSize: windowWidth <= 480 ? '0.8rem' : '0.9rem',
-      fontWeight: '600',
-      color: colors.textPrimary,
-      marginBottom: '2px',
-    },
-    featureDesc: {
-      fontSize: windowWidth <= 480 ? '0.7rem' : '0.75rem',
-      color: colors.textLight,
     },
     // Main Footer Grid
     grid: {
@@ -533,33 +463,8 @@ const Footer = () => {
     <footer style={styles.footer}>
       {/* Background overlay */}
       <div style={styles.gradientOverlay}></div>
-      
-      <div style={styles.container} className="footer-container">
-        {/* Features Bar */}
-        <div style={styles.featuresBar} className="footer-features">
-          {[
-            { icon: Truck, title: 'Free Shipping', desc: 'On orders ₹5000+', path: '/shipping' },
-            { icon: RefreshCw, title: 'Easy Returns', desc: '30-day return policy', path: '/returns' },
-            { icon: Shield, title: 'Secure Payment', desc: '256-bit SSL', path: '/security' },
-            { icon: Clock, title: '24/7 Support', desc: 'Dedicated help', path: '/contact' },
-          ].map((feature, index) => (
-            <div 
-              key={index} 
-              style={styles.featureCard} 
-              className="feature-card"
-              onClick={() => handleNavigation(feature.path)}
-            >
-              <div style={styles.featureIcon}>
-                <feature.icon size={windowWidth <= 480 ? 16 : 20} />
-              </div>
-              <div style={styles.featureText}>
-                <div style={styles.featureTitle}>{feature.title}</div>
-                <div style={styles.featureDesc}>{feature.desc}</div>
-              </div>
-            </div>
-          ))}
-        </div>
 
+      <div style={styles.container} className="footer-container">
         {/* Main Footer Grid */}
         <div style={styles.grid} className="footer-grid">
           {/* Brand Column */}
@@ -570,12 +475,12 @@ const Footer = () => {
               </div>
               <span style={styles.brandName}>OccaMart</span>
             </div>
-            
+
             <p style={styles.brandDescription}>
-              Odisha's premier destination for quality products and exceptional shopping experience. 
+              Odisha's premier destination for quality products and exceptional shopping experience.
               Serving Bhubaneswar and across India since 2024.
             </p>
-            
+
             <div style={styles.socialLinks} className="footer-social-links">
               {[
                 { icon: Facebook, color: '#1877f2', url: 'https://facebook.com/occamart' },
@@ -602,7 +507,7 @@ const Footer = () => {
               Quick Links
               <span style={styles.titleUnderline}></span>
             </h5>
-            
+
             <div className="footer-links-container">
               <ul style={styles.linkList}>
                 {quickLinks.slice(0, 5).map((item, index) => {
@@ -641,7 +546,7 @@ const Footer = () => {
               Categories
               <span style={styles.titleUnderline}></span>
             </h5>
-            
+
             <div className="footer-links-container">
               <ul style={styles.linkList}>
                 {categories.slice(0, 4).map((item, index) => (
@@ -666,16 +571,16 @@ const Footer = () => {
             </div>
           </div>
 
-          {/* Contact Column - UPDATED with Bhubaneswar location */}
+          {/* Contact Column */}
           <div style={styles.section} className="footer-section">
             <h5 style={styles.sectionTitle}>
               Contact Us
               <span style={styles.titleUnderline}></span>
             </h5>
-            
+
             <div style={styles.contactInfo}>
-              <div 
-                style={styles.contactItem} 
+              <div
+                style={styles.contactItem}
                 className="footer-contact-item"
                 onClick={() => window.open('https://maps.google.com/?q=Bhubaneswar,Odisha', '_blank')}
               >
@@ -684,9 +589,9 @@ const Footer = () => {
                 </div>
                 <span>Bhubaneswar, Odisha, India - 751001</span>
               </div>
-              
-              <div 
-                style={styles.contactItem} 
+
+              <div
+                style={styles.contactItem}
                 className="footer-contact-item"
                 onClick={() => window.location.href = 'mailto:support@occamart.com'}
               >
@@ -695,9 +600,9 @@ const Footer = () => {
                 </div>
                 <span>support@occamart.com</span>
               </div>
-              
-              <div 
-                style={styles.contactItem} 
+
+              <div
+                style={styles.contactItem}
                 className="footer-contact-item"
                 onClick={() => window.location.href = 'tel:+917847874670'}
               >
