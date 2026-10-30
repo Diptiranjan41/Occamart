@@ -1,9 +1,16 @@
-// src/context/AuthContext.jsx
-import React, { createContext, useState, useEffect, useContext } from 'react';
+// src/components/context/AuthContext.jsx
+import React, {
+    createContext,
+    useState,
+    useEffect,
+    useContext,
+    useCallback,
+    useMemo
+} from 'react';
 import axios from 'axios';
 
 // API base URL
-const API_BASE_URL = 'http://localhost:5000/api';
+const API_BASE_URL = import.meta.env?.VITE_API_URL || 'http://localhost:5000/api';
 
 // Create axios instance with default config
 const api = axios.create({
@@ -23,9 +30,7 @@ api.interceptors.request.use(
         }
         return config;
     },
-    (error) => {
-        return Promise.reject(error);
-    }
+    (error) => Promise.reject(error)
 );
 
 // Add response interceptor for error handling
@@ -54,6 +59,15 @@ const useAuth = () => {
     return context;
 };
 
+// Pull a user object out of the different response shapes the backend may return
+const extractUser = (data) => {
+    if (!data) return null;
+    if (data.user) return data.user;
+    if (data._id || data.id) return data;
+    if (data.success && data.data) return data.data.user || data.data;
+    return null;
+};
+
 // AuthProvider component
 const AuthProvider = ({ children }) => {
     const [user, setUser] = useState(null);
@@ -61,78 +75,39 @@ const AuthProvider = ({ children }) => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
-    // Fetch user data from backend using token
-    const fetchUserData = async (authToken) => {
+    // Fetch user data from backend using the stored token
+    const fetchUserData = useCallback(async () => {
         try {
-            console.log('📡 [AuthContext] Fetching user data with token:', authToken?.substring(0, 10) + '...');
-            
             const response = await api.get('/auth/me');
-            
-            console.log('✅ [AuthContext] User data response:', response.data);
-            
-            // Handle different response structures
-            if (response.data) {
-                let userData = null;
-                
-                if (response.data.user) {
-                    // Response has user property
-                    userData = response.data.user;
-                } else if (response.data._id || response.data.id) {
-                    // Response is directly the user object
-                    userData = response.data;
-                } else if (response.data.success && response.data.data) {
-                    // Response has success and data properties
-                    userData = response.data.data;
+            const userData = extractUser(response.data);
+
+            if (userData) {
+                // Ensure role is set
+                if (!userData.role) {
+                    userData.role = userData.email && userData.email.includes('admin') ? 'admin' : 'user';
                 }
-                
-                if (userData) {
-                    // ✅ IMPORTANT: Ensure role is properly set
-                    console.log('✅ [AuthContext] User role from backend:', userData.role);
-                    
-                    // If role is not set, try to determine from email
-                    if (!userData.role) {
-                        console.warn('⚠️ [AuthContext] No role found in user data');
-                        
-                        // Try to determine role from email
-                        if (userData.email && userData.email.includes('admin')) {
-                            userData.role = 'admin';
-                            console.log('✅ [AuthContext] Role set to admin based on email');
-                        } else {
-                            userData.role = 'user';
-                            console.log('✅ [AuthContext] Role set to user as default');
-                        }
-                    }
-                    
-                    setUser(userData);
-                    console.log('✅ [AuthContext] Final user object:', { 
-                        name: userData.name, 
-                        email: userData.email, 
-                        role: userData.role,
-                        isVerified: userData.isVerified 
-                    });
-                    return userData;
-                }
+                setUser(userData);
+                return userData;
             }
-            
-            console.warn('⚠️ [AuthContext] Unexpected response format:', response.data);
+
+            console.warn('⚠️ [AuthContext] Unexpected /auth/me response format:', response.data);
             return null;
-        } catch (error) {
+        } catch (err) {
             console.error('❌ [AuthContext] Error fetching user data:', {
-                message: error.message,
-                response: error.response?.data,
-                status: error.response?.status
+                message: err.message,
+                response: err.response?.data,
+                status: err.response?.status
             });
-            
+
             // If token is invalid, clear it
-            if (error.response?.status === 401) {
-                console.log('🔴 [AuthContext] Token invalid, clearing...');
+            if (err.response?.status === 401) {
                 localStorage.removeItem('token');
                 setToken(null);
                 setUser(null);
             }
             return null;
         }
-    };
+    }, []);
 
     // Initialize auth on mount
     useEffect(() => {
@@ -140,125 +115,90 @@ const AuthProvider = ({ children }) => {
             try {
                 const storedToken = localStorage.getItem('token');
 
-                console.log('📦 [AuthContext] Loading token from localStorage:', storedToken ? 'Token exists' : 'No token');
-
                 if (storedToken && storedToken !== 'undefined' && storedToken !== 'null') {
                     setToken(storedToken);
-                    // Fetch user data from backend
-                    await fetchUserData(storedToken);
-                } else {
-                    console.log('ℹ️ [AuthContext] No valid token found');
+                    await fetchUserData();
                 }
-            } catch (error) {
-                console.error('❌ [AuthContext] Error loading from localStorage:', error);
-                setError(error.message);
+            } catch (err) {
+                console.error('❌ [AuthContext] Error initializing auth:', err);
+                setError(err.message);
             } finally {
                 setLoading(false);
             }
         };
 
         initializeAuth();
-    }, []);
+    }, [fetchUserData]);
 
-    const login = async (credentials) => {
+    const login = useCallback(async (credentials) => {
         try {
             setError(null);
-            console.log('🔐 [AuthContext] Login called with:', { 
-                email: credentials.email, 
-                loginType: credentials.loginType 
-            });
-            
+
             const response = await api.post('/auth/login', {
                 email: credentials.email,
                 password: credentials.password,
                 loginType: credentials.loginType || 'user'
             });
 
-            console.log('✅ [AuthContext] Login successful, response:', response.data);
-
             // Handle different response structures
-            let token = null;
+            let newToken = null;
             let userData = null;
-            
+
             if (response.data.token && response.data.user) {
-                // Standard response
-                token = response.data.token;
+                newToken = response.data.token;
                 userData = response.data.user;
             } else if (response.data.data && response.data.data.token) {
-                // Nested data response
-                token = response.data.data.token;
+                newToken = response.data.data.token;
                 userData = response.data.data.user || response.data.data;
             } else if (response.data.token) {
-                // Only token, user might be separate
-                token = response.data.token;
+                newToken = response.data.token;
                 userData = response.data.user || response.data;
             }
 
-            if (!token) {
+            if (!newToken) {
                 throw new Error('No token received from server');
             }
 
-            // ✅ Ensure role is properly set
-            if (userData) {
-                if (!userData.role) {
-                    // If role not in response, set based on loginType
-                    userData.role = credentials.loginType === 'admin' ? 'admin' : 'user';
-                    console.log('✅ [AuthContext] Role set from loginType:', userData.role);
-                }
-                
-                console.log('✅ [AuthContext] User role after login:', userData.role);
+            // Ensure role is set
+            if (userData && !userData.role) {
+                userData.role = credentials.loginType === 'admin' ? 'admin' : 'user';
             }
 
-            // Store ONLY token in localStorage
-            localStorage.setItem('token', token);
-            
-            // Set user from backend response
-            setToken(token);
+            // Store ONLY the token in localStorage
+            localStorage.setItem('token', newToken);
+
+            setToken(newToken);
             setUser(userData);
 
-            console.log('✅ [AuthContext] Login state updated:', { 
-                token: token?.substring(0, 10) + '...', 
-                user: { name: userData?.name, email: userData?.email, role: userData?.role }
+            return { success: true, user: userData };
+        } catch (err) {
+            console.error('❌ [AuthContext] Login error:', {
+                message: err.message,
+                response: err.response?.data,
+                status: err.response?.status
             });
 
-            return { success: true, user: userData };
-        } catch (error) {
-            console.error('❌ [AuthContext] Login error:', {
-                message: error.message,
-                response: error.response?.data,
-                status: error.response?.status
-            });
-            
-            // Check if error is due to email verification
-            if (error.response?.data?.needsVerification) {
+            // Email verification required
+            if (err.response?.data?.needsVerification) {
                 return {
                     success: false,
                     needsVerification: true,
-                    email: error.response.data.email,
-                    message: error.response.data.message || 'Please verify your email first'
+                    email: err.response.data.email,
+                    message: err.response.data.message || 'Please verify your email first'
                 };
             }
-            
-            const errorMessage = error.response?.data?.message || error.message || 'Login failed';
-            setError(errorMessage);
-            
-            return {
-                success: false,
-                message: errorMessage
-            };
-        }
-    };
 
-    // ===== FIXED REGISTER FUNCTION =====
-    const register = async (userData) => {
+            const errorMessage = err.response?.data?.message || err.message || 'Login failed';
+            setError(errorMessage);
+
+            return { success: false, message: errorMessage };
+        }
+    }, []);
+
+    const register = useCallback(async (userData) => {
         try {
             setError(null);
-            console.log('📝 [AuthContext] Register called with:', { 
-                name: userData.name, 
-                email: userData.email,
-                role: userData.role 
-            });
-            
+
             const response = await api.post('/auth/register', {
                 name: userData.name,
                 email: userData.email,
@@ -266,140 +206,115 @@ const AuthProvider = ({ children }) => {
                 role: userData.role || 'user'
             });
 
-            console.log('✅ [AuthContext] Register response:', response.data);
-
-            // Handle different response structures
-            let token = null;
+            let newToken = null;
             let newUser = null;
-            
+
             // Case 1: Standard response with token
             if (response.data.token) {
-                token = response.data.token;
+                newToken = response.data.token;
                 newUser = response.data.user || response.data;
             }
             // Case 2: Nested data response
             else if (response.data.data?.token) {
-                token = response.data.data.token;
+                newToken = response.data.data.token;
                 newUser = response.data.data.user || response.data.data;
             }
             // Case 3: Success with message (email verification flow)
             else if (response.data.success && response.data.message) {
-                console.log('ℹ️ [AuthContext] Registration successful - email verification required');
-                
-                // Store email for verification page
                 localStorage.setItem('pendingVerification', JSON.stringify({
                     email: userData.email,
                     message: response.data.message
                 }));
-                
-                return { 
-                    success: true, 
+
+                return {
+                    success: true,
                     requiresVerification: true,
                     message: response.data.message,
-                    email: userData.email 
+                    email: userData.email
                 };
             }
 
-            // If we have token, auto-login the user
-            if (token) {
-                // Ensure role is properly set
+            // If we have a token, auto-login the user
+            if (newToken) {
                 if (newUser && !newUser.role) {
                     newUser.role = userData.role || 'user';
-                    console.log('✅ [AuthContext] Role set from registration:', newUser.role);
                 }
 
-                // Store token and user
-                localStorage.setItem('token', token);
-                setToken(token);
+                localStorage.setItem('token', newToken);
+                setToken(newToken);
                 setUser(newUser);
 
-                console.log('✅ [AuthContext] Auto-login successful:', { 
-                    name: newUser?.name, 
-                    email: newUser?.email,
-                    role: newUser?.role 
-                });
-
-                return { 
-                    success: true, 
-                    user: newUser,
-                    token: token 
-                };
+                return { success: true, user: newUser, token: newToken };
             }
-            
-            // Fallback - shouldn't reach here
-            return { 
-                success: true, 
-                message: response.data.message || 'Registration successful' 
-            };
 
-        } catch (error) {
-            console.error('❌ [AuthContext] Register error:', error.response?.data || error.message);
-            
-            const errorMessage = error.response?.data?.message || error.message || 'Registration failed';
-            setError(errorMessage);
-            
+            // Fallback
             return {
-                success: false,
-                message: errorMessage
+                success: true,
+                message: response.data.message || 'Registration successful'
             };
+        } catch (err) {
+            console.error('❌ [AuthContext] Register error:', err.response?.data || err.message);
+
+            const errorMessage = err.response?.data?.message || err.message || 'Registration failed';
+            setError(errorMessage);
+
+            return { success: false, message: errorMessage };
         }
-    };
+    }, []);
 
     // Resend verification email
-    const resendVerification = async (email) => {
+    const resendVerification = useCallback(async (email) => {
         try {
             setError(null);
-            console.log('📧 [AuthContext] Resending verification email to:', email);
-            
             const response = await api.post('/auth/resend-verification', { email });
-            
-            console.log('✅ [AuthContext] Resend verification response:', response.data);
-            
             return {
                 success: true,
                 message: response.data.message || 'Verification email sent'
             };
-        } catch (error) {
-            console.error('❌ [AuthContext] Resend verification error:', error.response?.data || error.message);
-            
+        } catch (err) {
+            console.error('❌ [AuthContext] Resend verification error:', err.response?.data || err.message);
             return {
                 success: false,
-                message: error.response?.data?.message || 'Failed to resend verification email'
+                message: err.response?.data?.message || 'Failed to resend verification email'
             };
         }
-    };
+    }, []);
 
-    const logout = () => {
-        console.log('🚪 [AuthContext] Logging out...');
-        // Clear all auth data
+    const logout = useCallback(() => {
         localStorage.removeItem('token');
         localStorage.removeItem('pendingVerification');
         setToken(null);
         setUser(null);
         setError(null);
-    };
+    }, []);
 
-    const isAdmin = () => {
-        const adminStatus = user?.role === 'admin';
-        console.log('👑 [AuthContext] isAdmin check:', { role: user?.role, isAdmin: adminStatus });
-        return adminStatus;
-    };
+    // Stable reference (only changes when the role changes), so effects that
+    // depend on isAdmin don't re-run on every render
+    const isAdmin = useCallback(() => user?.role === 'admin', [user?.role]);
 
-    // Check if user is verified
-    const isVerified = () => {
-        return user?.isVerified === true;
-    };
+    const isVerified = useCallback(() => user?.isVerified === true, [user?.isVerified]);
 
-    // Function to refresh user data (can be called after profile update)
-    const refreshUserData = async () => {
-        if (token) {
-            console.log('🔄 [AuthContext] Refreshing user data...');
-            return await fetchUserData(token);
+    // ✅ NEW: update the logged-in user locally (used by Profile after saving).
+    // Accepts a full or partial user object and merges it into the current user.
+    const updateUser = useCallback((updatedFields) => {
+        if (!updatedFields) return;
+        setUser((prev) => {
+            const merged = { ...(prev || {}), ...updatedFields };
+            // Never lose the role if the response omitted it
+            if (!merged.role) merged.role = prev?.role || 'user';
+            return merged;
+        });
+    }, []);
+
+    // Re-fetch user data from the backend
+    const refreshUserData = useCallback(async () => {
+        if (localStorage.getItem('token')) {
+            return await fetchUserData();
         }
         return null;
-    };
+    }, [fetchUserData]);
 
-    const value = {
+    const value = useMemo(() => ({
         user,
         token,
         loading,
@@ -409,23 +324,15 @@ const AuthProvider = ({ children }) => {
         logout,
         isAdmin,
         isVerified,
+        updateUser,
         refreshUserData,
         resendVerification,
         isAuthenticated: !!token && !!user
-    };
-
-    console.log('📊 [AuthContext] Current state:', { 
-        isAuthenticated: !!token && !!user, 
-        user: user ? { 
-            name: user.name, 
-            role: user.role, 
-            email: user.email,
-            isVerified: user.isVerified 
-        } : null,
-        isAdmin: user ? user.role === 'admin' : false,
-        loading,
-        hasError: !!error 
-    });
+    }), [
+        user, token, loading, error,
+        login, register, logout, isAdmin, isVerified,
+        updateUser, refreshUserData, resendVerification
+    ]);
 
     return (
         <AuthContext.Provider value={value}>
