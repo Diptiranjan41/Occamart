@@ -430,11 +430,20 @@ const OrderItemRow = ({ item, review, returnStatus, isDelivered, returnEligible,
               <Star size={14} /> Write a Review
             </button>
           )}
-          {!returnStatus && returnEligible && (
-            <button className="oh-btn info" onClick={onReturn}>
-              <RotateCcw size={14} /> Return
-            </button>
-          )}
+          {!returnStatus &&
+            (returnEligible ? (
+              <button className="oh-btn info" onClick={onReturn}>
+                <RotateCcw size={14} /> Return
+              </button>
+            ) : (
+              <button
+                className="oh-btn info"
+                disabled
+                title={`Return window (${RETURN_WINDOW_DAYS} days after delivery) has closed`}
+              >
+                <RotateCcw size={14} /> Return window closed
+              </button>
+            ))}
         </div>
       )}
     </div>
@@ -725,6 +734,7 @@ const OrderHistory = () => {
     setReorderingId(order._id);
     let added = 0;
     let failed = 0;
+    let lastError = '';
 
     for (const item of order.orderItems || []) {
       const pid = getProductId(item);
@@ -733,10 +743,12 @@ const OrderHistory = () => {
         continue;
       }
       try {
-        await addToCart(pid, item.qty || 1);
+        const res = await addToCart(pid, item.qty || 1);
+        if (res && res.success === false) throw new Error(res.message || 'Add to cart failed');
         added += 1;
       } catch (err) {
         console.error('Reorder failed for', item.name, err);
+        lastError = err.response?.data?.message || err.message || '';
         failed += 1;
       }
     }
@@ -754,7 +766,10 @@ const OrderHistory = () => {
       setDetailsOrderId(null);
       setTimeout(() => navigate('/cart'), 900);
     } else {
-      showToast('Could not reorder. Items may be out of stock.', 'error');
+      showToast(
+        lastError ? `Could not reorder: ${lastError}` : 'Could not reorder. Items may be out of stock.',
+        'error'
+      );
     }
   };
 
@@ -789,6 +804,7 @@ const OrderHistory = () => {
   };
 
   const handleReturnClick = (order, item) => {
+    console.log('Return clicked:', { orderId: order._id, item });
     setSelectedOrder(order);
     setSelectedProduct({ ...item, productId: getProductId(item) });
     setShowReturnModal(true);
@@ -827,7 +843,8 @@ const OrderHistory = () => {
 
   const isReturnEligible = (order) => {
     if (getStatusKey(order) !== 'delivered') return false;
-    const date = order.deliveredAt || order.createdAt;
+    // deliveredAt -> updatedAt (status change time) -> createdAt
+    const date = order.deliveredAt || order.updatedAt || order.createdAt;
     if (!date) return false;
     const days = (Date.now() - new Date(date).getTime()) / 86400000;
     return days <= RETURN_WINDOW_DAYS;
@@ -1160,6 +1177,22 @@ const OrderHistory = () => {
                         );
                       })}
                     </div>
+
+                    {!isDelivered && statusKey !== 'cancelled' && (
+                      <div
+                        style={{
+                          marginTop: '14px',
+                          padding: '10px 14px',
+                          background: colors.bgSecondary,
+                          border: `1px dashed ${colors.border}`,
+                          borderRadius: '10px',
+                          color: colors.textSecondary,
+                          fontSize: '0.85rem',
+                        }}
+                      >
+                        Review and Return options will appear here after this order is delivered.
+                      </div>
+                    )}
 
                     {/* Footer actions */}
                     <div
