@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { 
-  ShoppingCart, User, LogOut, Home, Store, LayoutDashboard, 
+  ShoppingCart, User, UserCircle, LogOut, Home, Store, LayoutDashboard, 
   ChevronDown, Menu, X, Package, BarChart3, Users, 
   ShoppingBag, Sparkles, Shield, Heart, ListOrdered,
   Bell, Settings, AlertCircle
@@ -45,17 +45,8 @@ const Header = () => {
                           location.pathname.includes('/checkout') ||
                           location.pathname.includes('/cart');
 
-    // ✅ FIXED: Use import.meta.env for Vite
+    // ✅ Use import.meta.env for Vite
     const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
-
-    // Debug log
-    console.log('🔍 Header Debug:', {
-        isAuthenticated,
-        hasToken: !!token,
-        isPaymentPage,
-        isAdmin: isAdmin(),
-        path: location.pathname
-    });
 
     // Color Scheme
     const colors = {
@@ -81,6 +72,13 @@ const Header = () => {
         window.addEventListener('resize', handleResize);
         return () => window.removeEventListener('resize', handleResize);
     }, []);
+
+    // Close menus on route change
+    useEffect(() => {
+        setIsMobileMenuOpen(false);
+        setIsUserMenuOpen(false);
+        setIsNotificationOpen(false);
+    }, [location.pathname]);
 
     // 🔥 FETCH ALL BACKEND DATA when authenticated (but not on payment pages)
     useEffect(() => {
@@ -110,33 +108,24 @@ const Header = () => {
         }
     }, [isAuthenticated, token, isPaymentPage, isAdmin]);
 
-    // 🔥 FETCH NOTIFICATIONS FROM BACKEND - FIXED with better error handling
+    // 🔥 FETCH NOTIFICATIONS FROM BACKEND
     const fetchNotifications = async () => {
         // Don't fetch on payment pages
-        if (isPaymentPage) {
-            console.log('On payment page, skipping notification fetch');
-            return;
-        }
+        if (isPaymentPage) return;
 
         // Don't fetch for non-admin users
         if (!isAdmin()) {
-            console.log('User is not admin, skipping notification fetch');
             setNotifications([]);
             setUnreadCount(0);
             return;
         }
 
-        if (!token) {
-            console.log('No token available, skipping notification fetch');
-            return;
-        }
+        if (!token) return;
         
         setLoadingNotifications(true);
         setNotificationError(false);
         
         try {
-            console.log('Fetching notifications from:', `${API_BASE_URL}/notifications`);
-            
             const response = await axios.get(`${API_BASE_URL}/notifications`, {
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -149,8 +138,6 @@ const Header = () => {
                 }
             });
             
-            console.log('Notifications response:', response.status, response.data);
-            
             if (response.status === 200 && response.data.success) {
                 setNotifications(response.data.notifications || []);
                 const unread = (response.data.notifications || []).filter(n => !n.read).length;
@@ -159,15 +146,13 @@ const Header = () => {
             } else if (response.status === 401 || response.status === 403) {
                 console.warn('Authentication error for notifications:', response.status);
                 setNotificationError(true);
-                // Don't show error to user, just set empty notifications
                 setNotifications([]);
                 setUnreadCount(0);
             } else if (response.status === 404) {
-                console.warn('Notifications endpoint not found (404)');
-                // Endpoint doesn't exist, set empty notifications
+                // Endpoint doesn't exist, feature not available
                 setNotifications([]);
                 setUnreadCount(0);
-                setNotificationError(false); // Not an error, just feature not available
+                setNotificationError(false);
             } else {
                 console.warn('Unexpected response for notifications:', response.status);
                 setNotifications([]);
@@ -176,14 +161,12 @@ const Header = () => {
         } catch (error) {
             console.error('Error fetching notifications:', error.message);
             
-            // Handle network errors gracefully
             if (error.code === 'ECONNABORTED') {
                 console.warn('Notifications request timeout');
             } else if (error.code === 'ERR_NETWORK') {
                 console.warn('Network error - backend might be down');
             }
             
-            // Set empty notifications on error
             setNotifications([]);
             setUnreadCount(0);
             setNotificationError(true);
@@ -208,7 +191,6 @@ const Header = () => {
             );
             
             if (response.data.success) {
-                // Update local state
                 setNotifications(prev => 
                     prev.map(notif => 
                         notif.id === notificationId ? { ...notif, read: true } : notif
@@ -260,7 +242,6 @@ const Header = () => {
             );
             
             if (response.data.success) {
-                // Remove from local state
                 const deletedNotification = notifications.find(n => n.id === notificationId);
                 setNotifications(prev => prev.filter(n => n.id !== notificationId));
                 if (deletedNotification && !deletedNotification.read) {
@@ -389,7 +370,7 @@ const Header = () => {
     // Check if should show notification bell (only for admin and not on payment pages)
     const shouldShowNotifications = isAdmin() && !isPaymentPage;
 
-    // Responsive styles (your existing styles remain the same)
+    // Responsive styles
     const styles = {
         navbar: {
             backgroundColor: scrolled ? colors.bgGlass : colors.bgPrimary,
@@ -657,7 +638,6 @@ const Header = () => {
         loginButton: {
             background: `linear-gradient(135deg, ${colors.primary} 0%, ${colors.primaryDark} 100%)`,
             color: '#FFFFFF',
-            border: 'none',
             padding: isMobile ? '8px 16px' : isTablet ? '10px 22px' : '12px 28px',
             borderRadius: '12px',
             fontSize: isMobile ? '0.85rem' : isTablet ? '0.9rem' : '0.95rem',
@@ -745,6 +725,9 @@ const Header = () => {
             borderBottom: `1px solid ${colors.border}`,
             marginBottom: '8px',
             background: colors.bgSecondary,
+            display: 'block',
+            textDecoration: 'none',
+            cursor: 'pointer',
         },
         userName: {
             fontWeight: '700',
@@ -817,6 +800,8 @@ const Header = () => {
             borderRadius: '16px',
             marginBottom: '20px',
             border: `1px solid ${colors.border}`,
+            textDecoration: 'none',
+            cursor: 'pointer',
         },
         badgeCount: {
             background: colors.primary,
@@ -943,6 +928,7 @@ const Header = () => {
                                                             ...styles.notificationItem,
                                                             ...(!notification.read ? styles.notificationItemUnread : {})
                                                         }}
+                                                        onClick={() => !notification.read && markAsRead(notification.id)}
                                                         onMouseEnter={(e) => {
                                                             const deleteBtn = e.currentTarget.querySelector('.delete-btn');
                                                             if (deleteBtn) deleteBtn.style.opacity = '1';
@@ -1009,10 +995,17 @@ const Header = () => {
                                     ...styles.dropdownMenu,
                                     ...(isUserMenuOpen ? styles.dropdownMenuOpen : {})
                                 }}>
-                                    <div style={styles.dropdownHeader}>
+                                    {/* Name + email also link to the profile page */}
+                                    <Link to="/profile" style={styles.dropdownHeader} onClick={() => setIsUserMenuOpen(false)}>
                                         <div style={styles.userName}>{user?.name}</div>
                                         <div style={styles.userEmail}>{user?.email}</div>
-                                    </div>
+                                    </Link>
+
+                                    {/* 👤 MY PROFILE - for both admins and regular users */}
+                                    <Link key="user-profile" to="/profile" style={styles.dropdownItem} onClick={() => setIsUserMenuOpen(false)}>
+                                        <UserCircle size={18} />
+                                        My Profile
+                                    </Link>
 
                                     {/* 👑 ADMIN MENU */}
                                     {isAdmin() && (
@@ -1101,7 +1094,7 @@ const Header = () => {
                             </button>
                         )}
                         
-                        <button key="mobile-menu" style={styles.mobileMenuButton} onClick={toggleMobileMenu}>
+                        <button key="mobile-menu" style={styles.mobileMenuButton} onClick={toggleMobileMenu} aria-label="Menu">
                             {isMobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
                         </button>
                     </div>
@@ -1147,6 +1140,7 @@ const Header = () => {
                                         ...styles.notificationItem,
                                         ...(!notification.read ? styles.notificationItemUnread : {})
                                     }}
+                                    onClick={() => !notification.read && markAsRead(notification.id)}
                                 >
                                     <div style={styles.notificationIconStyle}>
                                         {getNotificationIcon(notification.type)}
@@ -1159,12 +1153,14 @@ const Header = () => {
                                             {formatNotificationTime(notification.createdAt)}
                                         </div>
                                     </div>
+                                    {/* Always visible on mobile (no hover on touch screens) */}
                                     <button 
-                                        style={styles.notificationDelete}
+                                        style={{ ...styles.notificationDelete, opacity: 1 }}
                                         onClick={(e) => {
                                             e.stopPropagation();
                                             deleteNotification(notification.id);
                                         }}
+                                        aria-label="Delete notification"
                                     >
                                         <X size={14} />
                                     </button>
@@ -1182,7 +1178,8 @@ const Header = () => {
             {/* Mobile Menu */}
             {isMobile && isMobileMenuOpen && (
                 <div key="mobile-menu-container" style={styles.mobileMenu}>
-                    <div style={styles.mobileUserInfo}>
+                    {/* Tapping the user card opens the profile */}
+                    <Link to="/profile" style={styles.mobileUserInfo} onClick={toggleMobileMenu}>
                         <div style={styles.userAvatar}>{getUserInitials()}</div>
                         <div style={{ flex: 1, minWidth: 0 }}>
                             <div style={{ fontWeight: '700', color: colors.textPrimary, fontSize: '0.95rem' }}>
@@ -1197,7 +1194,7 @@ const Header = () => {
                                 {user?.email}
                             </div>
                         </div>
-                    </div>
+                    </Link>
 
                     <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
                         {/* Common Links */}
@@ -1209,6 +1206,11 @@ const Header = () => {
                         <li key="mobile-shop">
                             <Link to="/shop" style={styles.navLink} onClick={toggleMobileMenu}>
                                 <Store size={18} /> Shop
+                            </Link>
+                        </li>
+                        <li key="mobile-profile">
+                            <Link to="/profile" style={styles.navLink} onClick={toggleMobileMenu}>
+                                <UserCircle size={18} /> My Profile
                             </Link>
                         </li>
                         <li key="mobile-cart">
