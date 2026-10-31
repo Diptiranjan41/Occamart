@@ -1,6 +1,16 @@
 // backend/models/Cart.js
 import mongoose from 'mongoose';
 
+// Deal chal rahi ho to dealPrice, warna normal price
+export const getEffectivePrice = (product) => {
+  if (!product) return 0;
+  const dealActive =
+    product.isDeal && product.dealPrice && product.dealEnds && new Date(product.dealEnds) > new Date();
+  return dealActive ? product.dealPrice : product.price;
+};
+
+export const normalizeSize = (size) => String(size || '').trim().toUpperCase();
+
 const cartSchema = new mongoose.Schema({
   user: {
     type: mongoose.Schema.Types.ObjectId,
@@ -13,6 +23,13 @@ const cartSchema = new mongoose.Schema({
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Product',
       required: true
+    },
+    // T-shirt / shoes jaise products ke liye selected size ('' = size nahi hai)
+    size: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      default: ''
     },
     quantity: {
       type: Number,
@@ -29,32 +46,32 @@ const cartSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// 🔥 FIXED: Calculate total before saving with error handling
-cartSchema.pre('save', async function(next) {
+// Total calculate karo (populate kiye bina, taaki items.product ObjectId hi rahe)
+cartSchema.pre('save', async function (next) {
   try {
-    if (this.items.length > 0) {
-      // Populate products to get prices
-      await this.populate('items.product');
-      
-      // Calculate total safely
-      this.total = this.items.reduce((sum, item) => {
-        // Check if product exists and has price
-        if (item.product && item.product.price) {
-          return sum + (item.product.price * item.quantity);
-        }
-        // If product doesn't exist, skip this item (it will be removed later)
-        return sum;
-      }, 0);
-      
-      // 🔥 NEW: Remove items where product doesn't exist
-      this.items = this.items.filter(item => item.product != null);
-    } else {
+    if (this.items.length === 0) {
       this.total = 0;
+      return next();
     }
+
+    const Product = mongoose.model('Product');
+    const ids = this.items.map((i) => i.product);
+    const products = await Product.find({ _id: { $in: ids } }).select(
+      'price isDeal dealPrice dealEnds'
+    );
+    const map = new Map(products.map((p) => [p._id.toString(), p]));
+
+    // Jo products delete ho chuke hain unhe cart se hatao
+    this.items = this.items.filter((item) => map.has(item.product.toString()));
+
+    this.total = this.items.reduce((sum, item) => {
+      const p = map.get(item.product.toString());
+      return sum + getEffectivePrice(p) * item.quantity;
+    }, 0);
+
     next();
   } catch (error) {
     console.error('❌ Error in cart pre-save hook:', error);
-    // Set total to 0 and continue
     this.total = 0;
     next();
   }
