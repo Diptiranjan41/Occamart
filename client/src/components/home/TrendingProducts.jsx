@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Heart, ShoppingBag, Star, Loader } from 'lucide-react';
 
 // ⚠️ Ye file src/components/home/ mein hai, isliye api.js tak do level upar jaana padta hai.
@@ -26,6 +27,35 @@ const getImageUrl = (product) => {
     const fromImages = typeof first === 'object' ? first?.url : first;
     return toUrl(product.image || fromImages);
 };
+
+// ============================================================
+// RATING HELPERS
+// ============================================================
+
+// Decimal rating (4.3) ke hisaab se stars bharta hai (floor nahi karta)
+const StarRating = ({ rating = 0, size = 14 }) => {
+    const pct = Math.min(100, Math.max(0, (rating / 5) * 100));
+
+    const row = (color) => (
+        <div style={{ display: 'flex', gap: '2px', whiteSpace: 'nowrap' }}>
+            {[0, 1, 2, 3, 4].map((i) => (
+                <Star key={i} size={size} color={color} fill={color} style={{ flexShrink: 0 }} />
+            ))}
+        </div>
+    );
+
+    return (
+        <div style={{ position: 'relative', display: 'inline-block' }} aria-label={`${rating} out of 5`}>
+            {row('#E5E7EB')}
+            <div style={{ position: 'absolute', top: 0, left: 0, width: `${pct}%`, overflow: 'hidden' }}>
+                {row('#D4AF37')}
+            </div>
+        </div>
+    );
+};
+
+// Flipkart jaisa rating badge ka color
+const ratingColor = (r) => (r >= 4 ? '#16A34A' : r >= 3 ? '#F59E0B' : '#EF4444');
 
 // ============================================================
 // STYLES (component ke bahar, taaki har render par dobara na bane)
@@ -68,6 +98,8 @@ const styles = {
         border: '1px solid #E5E7EB',
         transition: 'all 0.3s ease',
         position: 'relative',
+        display: 'flex',
+        flexDirection: 'column',
     },
     wishlist: {
         position: 'absolute',
@@ -95,6 +127,7 @@ const styles = {
         background: '#FFFFFF',
         padding: '8px',
         boxSizing: 'border-box',
+        cursor: 'pointer',
     },
     productImage: {
         width: '100%',
@@ -108,9 +141,37 @@ const styles = {
         fontSize: '1.1rem',
         fontWeight: '600',
         marginBottom: '10px',
+        cursor: 'pointer',
     },
-    rating: { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' },
-    stars: { display: 'flex', gap: '2px' },
+    ratingRow: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+        marginBottom: '10px',
+        flexWrap: 'wrap',
+        cursor: 'pointer',
+    },
+    ratingBadge: {
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '3px',
+        padding: '2px 8px',
+        borderRadius: '6px',
+        color: '#FFFFFF',
+        fontSize: '0.8rem',
+        fontWeight: '700',
+    },
+    reviewCount: { color: '#6B7280', fontSize: '0.85rem' },
+    sizeSection: { marginBottom: '14px' },
+    sizeLabel: {
+        fontSize: '0.8rem',
+        fontWeight: '600',
+        color: '#4B5563',
+        marginBottom: '6px',
+        display: 'flex',
+        justifyContent: 'space-between',
+    },
+    sizeList: { display: 'flex', flexWrap: 'wrap', gap: '6px' },
     price: {
         fontSize: '1.25rem',
         fontWeight: '700',
@@ -131,6 +192,7 @@ const styles = {
         justifyContent: 'center',
         gap: '8px',
         transition: 'all 0.3s ease',
+        marginTop: 'auto',
     },
     addToCartDisabled: { background: '#ccc', cursor: 'not-allowed' },
     badge: {
@@ -145,6 +207,7 @@ const styles = {
         zIndex: 2,
     },
     dealBadge: { background: '#EF4444' },
+    outBadge: { background: '#6B7280' },
     loadingOverlay: {
         display: 'flex',
         justifyContent: 'center',
@@ -161,6 +224,22 @@ const styles = {
     },
 };
 
+// Size chip ka style (selected / available / out of stock)
+const sizeChipStyle = (selected, inStock) => ({
+    minWidth: '38px',
+    padding: '5px 10px',
+    borderRadius: '8px',
+    fontSize: '0.8rem',
+    fontWeight: '600',
+    cursor: inStock ? 'pointer' : 'not-allowed',
+    border: `1.5px solid ${selected ? '#D4AF37' : '#E5E7EB'}`,
+    background: selected ? '#D4AF37' : '#FFFFFF',
+    color: selected ? '#FFFFFF' : inStock ? '#1F2937' : '#9CA3AF',
+    opacity: inStock ? 1 : 0.55,
+    textDecoration: inStock ? 'none' : 'line-through',
+    transition: 'all 0.2s ease',
+});
+
 const spinKeyframes = `
     @keyframes spin {
         0% { transform: rotate(0deg); }
@@ -172,12 +251,16 @@ const spinKeyframes = `
 // COMPONENT
 // ============================================================
 const TrendingProducts = () => {
+    const navigate = useNavigate();
+
     const [products, setProducts] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [addingToCart, setAddingToCart] = useState({});
     const [addingToWishlist, setAddingToWishlist] = useState({});
     const [imageErrors, setImageErrors] = useState({});
+    const [selectedSizes, setSelectedSizes] = useState({}); // { productId: 'M' }
+    const [sizeErrors, setSizeErrors] = useState({}); // { productId: true }
 
     const { isAuthenticated } = useAuth();
     const { addToCart: addToCartContext } = useCart();
@@ -232,10 +315,29 @@ const TrendingProducts = () => {
         };
     }, []);
 
+    // ---------- Size select ----------
+    const handleSelectSize = (productId, size) => {
+        setSelectedSizes((prev) => ({
+            ...prev,
+            // same size dobara click karne par unselect
+            [productId]: prev[productId] === size ? undefined : size,
+        }));
+        setSizeErrors((prev) => ({ ...prev, [productId]: false }));
+    };
+
     // ---------- Add to cart ----------
     const handleAddToCart = async (product) => {
         if (!isAuthenticated) {
             alert('Please login to add items to cart');
+            return;
+        }
+
+        const hasSizes = product.sizes?.length > 0;
+        const size = selectedSizes[product._id];
+
+        // Sizes wale product me size select karna zaroori hai
+        if (hasSizes && !size) {
+            setSizeErrors((prev) => ({ ...prev, [product._id]: true }));
             return;
         }
 
@@ -245,11 +347,12 @@ const TrendingProducts = () => {
             const response = await api.post('/cart/add', {
                 productId: product._id,
                 quantity: 1,
+                ...(size ? { size } : {}),
             });
 
             if (response.data.success) {
-                addToCartContext({ ...product, quantity: 1 });
-                alert('✅ Product added to cart successfully!');
+                addToCartContext({ ...product, quantity: 1, ...(size ? { size } : {}) });
+                alert(`✅ Product added to cart${size ? ` (Size: ${size})` : ''}!`);
             }
         } catch (err) {
             console.error('Error adding to cart:', err);
@@ -351,6 +454,7 @@ const TrendingProducts = () => {
                     <h2 style={styles.title}>Trending Products</h2>
                     <button
                         style={styles.viewAll}
+                        onClick={() => navigate('/products?isTrending=true')}
                         onMouseEnter={(e) => {
                             e.currentTarget.style.background = '#D4AF37';
                             e.currentTarget.style.color = '#FFFFFF';
@@ -369,8 +473,21 @@ const TrendingProducts = () => {
                         const inWishlist = isInWishlist(product._id);
                         const imageUrl = getImageUrl(product);
                         const showImage = imageUrl && !imageErrors[product._id];
-                        const rating = Math.floor(product.rating || 0);
                         const busy = !!addingToCart[product._id];
+
+                        // ----- Rating / reviews -----
+                        const rating = Number(product.rating) || 0;
+                        const numReviews = Number(product.numReviews) || 0;
+                        const hasReviews = numReviews > 0 && rating > 0;
+
+                        // ----- Sizes / stock -----
+                        const sizes = product.sizes || [];
+                        const hasSizes = sizes.length > 0;
+                        const selectedSize = selectedSizes[product._id];
+                        const selectedEntry = sizes.find((s) => s.size === selectedSize);
+                        const outOfStock = (product.countInStock || 0) <= 0;
+                        const sizeError = !!sizeErrors[product._id];
+                        const disabled = busy || outOfStock;
 
                         return (
                             <div
@@ -386,10 +503,16 @@ const TrendingProducts = () => {
                                     e.currentTarget.style.boxShadow = 'none';
                                 }}
                             >
-                                {product.isDeal && (
-                                    <div style={{ ...styles.badge, ...styles.dealBadge }}>
-                                        🔥 Deal
+                                {outOfStock ? (
+                                    <div style={{ ...styles.badge, ...styles.outBadge }}>
+                                        Out of Stock
                                     </div>
+                                ) : (
+                                    product.isDeal && (
+                                        <div style={{ ...styles.badge, ...styles.dealBadge }}>
+                                            🔥 Deal
+                                        </div>
+                                    )
                                 )}
 
                                 {/* Wishlist */}
@@ -419,12 +542,18 @@ const TrendingProducts = () => {
                                 </div>
 
                                 {/* Image */}
-                                <div style={styles.imageContainer}>
+                                <div
+                                    style={styles.imageContainer}
+                                    onClick={() => navigate(`/product/${product._id}`)}
+                                >
                                     {showImage ? (
                                         <img
                                             src={imageUrl}
                                             alt={product.name}
-                                            style={styles.productImage}
+                                            style={{
+                                                ...styles.productImage,
+                                                opacity: outOfStock ? 0.6 : 1,
+                                            }}
                                             loading="lazy"
                                             onMouseEnter={(e) =>
                                                 (e.currentTarget.style.transform = 'scale(1.05)')
@@ -441,25 +570,82 @@ const TrendingProducts = () => {
                                     )}
                                 </div>
 
-                                {/* Details */}
-                                <div style={styles.productName}>{product.name}</div>
-
-                                <div style={styles.rating}>
-                                    <div style={styles.stars}>
-                                        {[0, 1, 2, 3, 4].map((i) => (
-                                            <Star
-                                                key={i}
-                                                size={14}
-                                                color={i < rating ? '#D4AF37' : '#E5E7EB'}
-                                                fill={i < rating ? '#D4AF37' : 'none'}
-                                            />
-                                        ))}
-                                    </div>
-                                    <span style={{ color: '#6B7280', fontSize: '0.85rem' }}>
-                                        ({product.numReviews || 0})
-                                    </span>
+                                {/* Name */}
+                                <div
+                                    style={styles.productName}
+                                    onClick={() => navigate(`/product/${product._id}`)}
+                                >
+                                    {product.name}
                                 </div>
 
+                                {/* Rating + reviews */}
+                                <div
+                                    style={styles.ratingRow}
+                                    onClick={() => navigate(`/product/${product._id}#reviews`)}
+                                    title="Reviews dekhein"
+                                >
+                                    {hasReviews ? (
+                                        <>
+                                            <span
+                                                style={{
+                                                    ...styles.ratingBadge,
+                                                    background: ratingColor(rating),
+                                                }}
+                                            >
+                                                {rating.toFixed(1)}
+                                                <Star size={11} color="#FFFFFF" fill="#FFFFFF" />
+                                            </span>
+                                            <StarRating rating={rating} size={14} />
+                                            <span style={styles.reviewCount}>
+                                                ({numReviews.toLocaleString('en-IN')}{' '}
+                                                {numReviews === 1 ? 'review' : 'reviews'})
+                                            </span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <StarRating rating={0} size={14} />
+                                            <span style={styles.reviewCount}>No reviews yet</span>
+                                        </>
+                                    )}
+                                </div>
+
+                                {/* Sizes */}
+                                {hasSizes && (
+                                    <div style={styles.sizeSection}>
+                                        <div style={styles.sizeLabel}>
+                                            <span>Select Size</span>
+                                            {selectedEntry && selectedEntry.stock > 0 && selectedEntry.stock <= 5 && (
+                                                <span style={{ color: '#EF4444' }}>
+                                                    Only {selectedEntry.stock} left!
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div style={styles.sizeList}>
+                                            {sizes.map((s) => {
+                                                const inStock = s.stock > 0;
+                                                return (
+                                                    <button
+                                                        key={s.size}
+                                                        type="button"
+                                                        disabled={!inStock}
+                                                        title={inStock ? `${s.stock} available` : 'Out of stock'}
+                                                        style={sizeChipStyle(selectedSize === s.size, inStock)}
+                                                        onClick={() => handleSelectSize(product._id, s.size)}
+                                                    >
+                                                        {s.size}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                        {sizeError && (
+                                            <div style={{ color: '#EF4444', fontSize: '0.8rem', marginTop: '6px' }}>
+                                                Please select a size
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                {/* Price */}
                                 <div style={styles.price}>
                                     {product.isDeal && product.dealPrice ? (
                                         <>
@@ -480,19 +666,20 @@ const TrendingProducts = () => {
                                     )}
                                 </div>
 
+                                {/* Add to cart */}
                                 <button
                                     style={{
                                         ...styles.addToCart,
-                                        ...(busy ? styles.addToCartDisabled : {}),
+                                        ...(disabled ? styles.addToCartDisabled : {}),
                                     }}
                                     onMouseEnter={(e) => {
-                                        if (!busy) e.currentTarget.style.background = '#B8962E';
+                                        if (!disabled) e.currentTarget.style.background = '#B8962E';
                                     }}
                                     onMouseLeave={(e) => {
-                                        if (!busy) e.currentTarget.style.background = '#D4AF37';
+                                        if (!disabled) e.currentTarget.style.background = '#D4AF37';
                                     }}
                                     onClick={() => handleAddToCart(product)}
-                                    disabled={busy}
+                                    disabled={disabled}
                                 >
                                     {busy ? (
                                         <>
@@ -502,6 +689,8 @@ const TrendingProducts = () => {
                                             />
                                             Adding...
                                         </>
+                                    ) : outOfStock ? (
+                                        'Out of Stock'
                                     ) : (
                                         <>
                                             <ShoppingBag size={16} /> Add to Cart
