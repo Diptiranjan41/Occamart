@@ -261,9 +261,22 @@ const TrendingProducts = () => {
     const [imageErrors, setImageErrors] = useState({});
     const [selectedSizes, setSelectedSizes] = useState({}); // { productId: 'M' }
     const [sizeErrors, setSizeErrors] = useState({}); // { productId: true }
+    const [toast, setToast] = useState(null); // { type, text, action? }
+
+    const showToast = (type, text, action = null) => setToast({ type, text, action });
+
+    // Toast 5 second baad apne aap hat jaata hai
+    useEffect(() => {
+        if (!toast) return;
+        const t = setTimeout(() => setToast(null), 5000);
+        return () => clearTimeout(t);
+    }, [toast]);
 
     const { isAuthenticated } = useAuth();
-    const { addToCart: addToCartContext } = useCart();
+    const cartCtx = useCart();
+    const { addToCart: addToCartContext } = cartCtx;
+    // Cart context me jo bhi "backend se cart dobara load karne wala" function ho, wo use hoga
+    const syncCart = cartCtx.fetchCart || cartCtx.refreshCart || cartCtx.loadCart || cartCtx.getCart;
     const {
         addToWishlist: addToWishlistContext,
         removeFromWishlist,
@@ -328,7 +341,10 @@ const TrendingProducts = () => {
     // ---------- Add to cart ----------
     const handleAddToCart = async (product) => {
         if (!isAuthenticated) {
-            alert('Please login to add items to cart');
+            showToast('error', 'Please login to add items to cart', {
+                label: 'Login',
+                onClick: () => navigate('/login'),
+            });
             return;
         }
 
@@ -351,12 +367,30 @@ const TrendingProducts = () => {
             });
 
             if (response.data.success) {
-                addToCartContext({ ...product, quantity: 1, ...(size ? { size } : {}) });
-                alert(`✅ Product added to cart${size ? ` (Size: ${size})` : ''}!`);
+                // Cart ko backend se refresh karo taaki cart page me product turant dikhe.
+                // Agar context me refresh function nahi hai to local add use hoga.
+                let synced = false;
+                if (typeof syncCart === 'function') {
+                    try {
+                        await syncCart();
+                        synced = true;
+                    } catch (e) {
+                        console.warn('Cart sync failed, local add use ho raha hai:', e);
+                    }
+                }
+                if (!synced && typeof addToCartContext === 'function') {
+                    addToCartContext({ ...product, quantity: 1, ...(size ? { size } : {}) });
+                }
+
+                showToast(
+                    'success',
+                    `${product.name}${size ? ` (Size: ${size})` : ''} added to cart`,
+                    { label: 'View Cart', onClick: () => navigate('/cart') }
+                );
             }
         } catch (err) {
             console.error('Error adding to cart:', err);
-            alert(err.response?.data?.message || err.message || 'Failed to add to cart');
+            showToast('error', err.response?.data?.message || err.message || 'Failed to add to cart');
         } finally {
             setAddingToCart((prev) => ({ ...prev, [product._id]: false }));
         }
@@ -702,6 +736,66 @@ const TrendingProducts = () => {
                     })}
                 </div>
             </div>
+
+            {/* Toast (alert ki jagah) */}
+            {toast && (
+                <div
+                    role="status"
+                    style={{
+                        position: 'fixed',
+                        bottom: '24px',
+                        right: '24px',
+                        zIndex: 3000,
+                        background: '#1F2937',
+                        color: '#FFFFFF',
+                        padding: '14px 18px',
+                        borderRadius: '12px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '14px',
+                        boxShadow: '0 10px 30px rgba(0,0,0,0.25)',
+                        maxWidth: '90vw',
+                        borderLeft: `4px solid ${toast.type === 'error' ? '#EF4444' : '#16A34A'}`,
+                    }}
+                >
+                    <span style={{ fontSize: '0.9rem' }}>
+                        {toast.type === 'error' ? '⚠️' : '✅'} {toast.text}
+                    </span>
+                    {toast.action && (
+                        <button
+                            onClick={() => {
+                                toast.action.onClick();
+                                setToast(null);
+                            }}
+                            style={{
+                                background: '#D4AF37',
+                                color: '#FFFFFF',
+                                border: 'none',
+                                borderRadius: '8px',
+                                padding: '6px 12px',
+                                fontWeight: '600',
+                                cursor: 'pointer',
+                                whiteSpace: 'nowrap',
+                            }}
+                        >
+                            {toast.action.label}
+                        </button>
+                    )}
+                    <button
+                        onClick={() => setToast(null)}
+                        aria-label="Close"
+                        style={{
+                            background: 'none',
+                            border: 'none',
+                            color: '#9CA3AF',
+                            cursor: 'pointer',
+                            fontSize: '1rem',
+                        }}
+                    >
+                        ✕
+                    </button>
+                </div>
+            )}
 
             <style>{spinKeyframes}</style>
         </section>
