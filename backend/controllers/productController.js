@@ -9,6 +9,34 @@ const escapeRegex = (str = '') => String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\
 
 const toBool = (v) => v === true || v === 'true';
 
+const parseJSON = (value, fallback) => {
+  if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value !== 'string') return value;
+  try {
+    return JSON.parse(value);
+  } catch (e) {
+    return fallback;
+  }
+};
+
+// FormData se aaye sizes ko clean karta hai -> [{ size: 'M', stock: 10 }]
+// Duplicate / khali sizes hata deta hai, size uppercase hota hai
+const cleanSizes = (raw) => {
+  const arr = parseJSON(raw, []);
+  if (!Array.isArray(arr)) return [];
+  const seen = new Set();
+  return arr
+    .map((s) => ({
+      size: String(s?.size ?? '').trim().toUpperCase(),
+      stock: Math.max(0, Number(s?.stock) || 0)
+    }))
+    .filter((s) => s.size && !seen.has(s.size) && seen.add(s.size));
+};
+
+const sumStock = (sizes) => sizes.reduce((sum, s) => sum + s.stock, 0);
+
+const clampRating = (v) => Math.min(5, Math.max(0, Number(v) || 0));
+
 // Cloudinary URL se public_id nikalta hai
 // https://res.cloudinary.com/xxx/image/upload/v123/occamart/products/abc.jpg -> occamart/products/abc
 const getPublicId = (url) => {
@@ -31,6 +59,20 @@ const deleteCloudImages = async (urls = []) => {
   }
 };
 
+// Sirf wahi images delete karta hai jo kisi aur product me use nahi ho rahi
+// (duplicateProduct same URLs share karta hai, isliye ye check zaroori hai)
+const deleteUnusedCloudImages = async (urls = [], excludeProductId) => {
+  const unused = [];
+  for (const url of urls) {
+    const stillUsed = await Product.exists({
+      _id: { $ne: excludeProductId },
+      $or: [{ images: url }, { image: url }]
+    });
+    if (!stillUsed) unused.push(url);
+  }
+  await deleteCloudImages(unused);
+};
+
 // Upload middleware ke baad file.path mein permanent https URL hota hai
 const getUploadedUrls = (files = []) => files.map((f) => f.path).filter(Boolean);
 
@@ -45,6 +87,8 @@ const parseFeatures = (raw) => {
   }
 };
 
+const MAX_IMAGES = 5;
+
 // ============================================================
 // PUBLIC ROUTES
 // ============================================================
@@ -55,7 +99,8 @@ const parseFeatures = (raw) => {
 export const getProducts = async (req, res) => {
   try {
     const pageSize = Number(req.query.limit) || 10;
-    const page = Number(req.query.pageNumber) || 1;
+    // Admin frontend `page` bhejta hai, purana code `pageNumber` — dono chalenge
+    const page = Number(req.query.page) || Number(req.query.pageNumber) || 1;
     const category = req.query.category;
     const sort = req.query.sort || 'createdAt';
 
@@ -67,6 +112,18 @@ export const getProducts = async (req, res) => {
 
     if (category && category !== 'all' && category !== 'undefined') {
       filter.category = category;
+    }
+
+    // Size filter: /api/products?size=M  (sirf wo products jinme M size ka stock hai)
+    if (req.query.size) {
+      filter.sizes = {
+        $elemMatch: { size: String(req.query.size).toUpperCase(), stock: { $gt: 0 } }
+      };
+    }
+
+    // Minimum rating filter: /api/products?minRating=4
+    if (req.query.minRating) {
+      filter.rating = { $gte: Number(req.query.minRating) };
     }
 
     if (req.query.keyword) {
@@ -82,7 +139,7 @@ export const getProducts = async (req, res) => {
         sortOption = { price: -1 };
         break;
       case 'rating':
-        sortOption = { rating: -1 };
+        sortOption = { rating: -1, numReviews: -1 };
         break;
       case 'featured':
         sortOption = { isFeatured: -1, createdAt: -1 };
@@ -138,7 +195,7 @@ export const getFeaturedProducts = async (req, res) => {
         sortOption = { price: -1 };
         break;
       case 'rating':
-        sortOption = { rating: -1 };
+        sortOption = { rating: -1, numReviews: -1 };
         break;
       case 'newest':
       case 'featured':
@@ -285,9 +342,11 @@ export const getRelatedProducts = async (req, res) => {
 export const getTopProducts = async (req, res) => {
   try {
     const products = await Product.find({ isActive: true })
-      .sort({ rating: -1 })
+      .sort({ rating: -1, numReviews: -1 })
       .limit(5)
-      .select('name price images image rating numReviews isFeatured isTrending');
+      .select(
+        'name price images image rating numReviews sizes countInStock isFeatured isTrending isDeal dealPrice'
+      );
 
     res.json({ success: true, products });
   } catch (error) {
@@ -307,7 +366,9 @@ export const getDealProducts = async (req, res) => {
       dealEnds: { $gt: new Date() }
     })
       .sort({ dealPrice: 1 })
-      .select('name price dealPrice dealEnds discount images image isFeatured isTrending');
+      .select(
+        'name price dealPrice dealEnds discount images image rating numReviews sizes countInStock isFeatured isTrending'
+      );
 
     res.json({ success: true, count: products.length, products });
   } catch (error) {
@@ -326,29 +387,25 @@ export const getDealProducts = async (req, res) => {
 export const createProduct = async (req, res) => {
   const uploadedUrls = getUploadedUrls(req.files);
 
+  const fail = async (status, message) => {
+    await deleteCloudImages(uploadedUrls);
+    return res.status(status).json({ success: false, message });
+  };
+
   try {
     const { name, price, description, category, countInStock } = req.body;
 
-    if (!name) {
-      await deleteCloudImages(uploadedUrls);
-      return res.status(400).json({ success: false, message: 'Product name is required' });
-    }
-    if (!price) {
-      await deleteCloudImages(uploadedUrls);
-      return res.status(400).json({ success: false, message: 'Price is required' });
-    }
-    if (!description) {
-      await deleteCloudImages(uploadedUrls);
-      return res.status(400).json({ success: false, message: 'Description is required' });
-    }
-    if (!category) {
-      await deleteCloudImages(uploadedUrls);
-      return res.status(400).json({ success: false, message: 'Category is required' });
-    }
-    // 0 stock bhi valid hai, isliye undefined check
-    if (countInStock === undefined || countInStock === '') {
-      await deleteCloudImages(uploadedUrls);
-      return res.status(400).json({ success: false, message: 'Stock quantity is required' });
+    const sizes = cleanSizes(req.body.sizes);
+    const hasSizes = sizes.length > 0;
+
+    if (!name) return fail(400, 'Product name is required');
+    if (!price) return fail(400, 'Price is required');
+    if (!description) return fail(400, 'Description is required');
+    if (!category) return fail(400, 'Category is required');
+
+    // Sizes hain to stock unse nikalta hai; warna 0 bhi valid hai, isliye undefined check
+    if (!hasSizes && (countInStock === undefined || countInStock === '')) {
+      return fail(400, 'Stock quantity is required');
     }
 
     if (uploadedUrls.length === 0) {
@@ -356,6 +413,16 @@ export const createProduct = async (req, res) => {
         success: false,
         message: 'At least one product image is required'
       });
+    }
+    if (uploadedUrls.length > MAX_IMAGES) {
+      return fail(400, `Maximum ${MAX_IMAGES} images allowed`);
+    }
+
+    if (req.body.rating !== undefined && req.body.rating !== '') {
+      const r = Number(req.body.rating);
+      if (isNaN(r) || r < 0 || r > 5) {
+        return fail(400, 'Rating 0 se 5 ke beech honi chahiye');
+      }
     }
 
     const features = parseFeatures(req.body.features) || [];
@@ -369,7 +436,8 @@ export const createProduct = async (req, res) => {
       price: Number(price),
       description: description.trim(),
       category,
-      countInStock: Number(countInStock),
+      sizes,
+      countInStock: hasSizes ? sumStock(sizes) : Number(countInStock),
       brand: req.body.brand?.trim() || 'General',
       image: uploadedUrls[0],
       images: uploadedUrls,
@@ -384,25 +452,14 @@ export const createProduct = async (req, res) => {
       user: req.user._id,
       views: 0,
       sold: 0,
-      rating: 0,
-      numReviews: 0
+      // Admin ki di hui initial rating (customer reviews aane par recalculate hogi)
+      rating: clampRating(req.body.rating),
+      numReviews: Math.max(0, Number(req.body.numReviews) || 0)
     };
 
     if (isDeal) {
-      if (!req.body.dealPrice) {
-        await deleteCloudImages(uploadedUrls);
-        return res.status(400).json({
-          success: false,
-          message: 'Deal price is required for deal products'
-        });
-      }
-      if (!req.body.dealEnds) {
-        await deleteCloudImages(uploadedUrls);
-        return res.status(400).json({
-          success: false,
-          message: 'Deal end date is required for deal products'
-        });
-      }
+      if (!req.body.dealPrice) return fail(400, 'Deal price is required for deal products');
+      if (!req.body.dealEnds) return fail(400, 'Deal end date is required for deal products');
 
       productData.dealPrice = Number(req.body.dealPrice);
       productData.dealEnds = new Date(req.body.dealEnds);
@@ -435,56 +492,114 @@ export const createProduct = async (req, res) => {
 export const updateProduct = async (req, res) => {
   const uploadedUrls = getUploadedUrls(req.files);
 
+  const fail = async (status, message) => {
+    await deleteCloudImages(uploadedUrls);
+    return res.status(status).json({ success: false, message });
+  };
+
   try {
     const product = await Product.findById(req.params.id);
 
-    if (!product) {
-      await deleteCloudImages(uploadedUrls);
-      return res.status(404).json({ success: false, message: 'Product not found' });
+    if (!product) return fail(404, 'Product not found');
+
+    const b = req.body;
+
+    // ---------- Basic fields ----------
+    if (b.name) product.name = b.name.trim();
+    if (b.price !== undefined && b.price !== '') product.price = Number(b.price);
+    if (b.description) product.description = b.description.trim();
+    if (b.category) product.category = b.category;
+    if (b.brand !== undefined && b.brand.trim()) product.brand = b.brand.trim();
+
+    // ---------- Sizes + stock ----------
+    // Frontend hamesha sizes bhejta hai ('[]' = saare sizes hata do)
+    if (b.sizes !== undefined) {
+      product.sizes = cleanSizes(b.sizes);
+    }
+    if (product.sizes && product.sizes.length > 0) {
+      product.countInStock = sumStock(product.sizes);
+    } else if (b.countInStock !== undefined && b.countInStock !== '') {
+      product.countInStock = Math.max(0, Number(b.countInStock) || 0);
     }
 
-    product.name = req.body.name || product.name;
-    product.price = req.body.price ? Number(req.body.price) : product.price;
-    product.description = req.body.description || product.description;
-    product.category = req.body.category || product.category;
-    if (req.body.countInStock !== undefined && req.body.countInStock !== '') {
-      product.countInStock = Number(req.body.countInStock);
+    // ---------- Rating ----------
+    // Agar real customer reviews hain to rating unhi se chalti hai, admin override nahi karega
+    if (product.reviews.length === 0) {
+      if (b.rating !== undefined && b.rating !== '') {
+        const r = Number(b.rating);
+        if (isNaN(r) || r < 0 || r > 5) {
+          return fail(400, 'Rating 0 se 5 ke beech honi chahiye');
+        }
+        product.rating = clampRating(r);
+      }
+      if (b.numReviews !== undefined && b.numReviews !== '') {
+        product.numReviews = Math.max(0, Number(b.numReviews) || 0);
+      }
     }
-    product.brand = req.body.brand || product.brand;
 
-    const features = parseFeatures(req.body.features);
+    const features = parseFeatures(b.features);
     if (features) product.features = features;
 
-    // Nayi images: Cloudinary URLs add hoti hain
-    if (uploadedUrls.length > 0) {
-      product.images = [...(product.images || []), ...uploadedUrls];
-      product.image = product.images[0] || product.image;
+    // ---------- Images ----------
+    // existingImages = jo purani images admin ne rakhi hain. Nahi bheji to sab purani rahengi.
+    const parsedKeep = parseJSON(b.existingImages, null);
+    const keepImages = Array.isArray(parsedKeep) ? parsedKeep : product.images || [];
+    // Sirf wahi URLs rakho jo pehle se is product me hain (security)
+    const validKeep = keepImages.filter((url) => (product.images || []).includes(url));
+    const removedImages = (product.images || []).filter((url) => !validKeep.includes(url));
+    const mergedImages = [...validKeep, ...uploadedUrls];
+
+    if (mergedImages.length === 0) {
+      return fail(400, 'At least one product image is required');
+    }
+    if (mergedImages.length > MAX_IMAGES) {
+      return fail(400, `Maximum ${MAX_IMAGES} images allowed`);
     }
 
-    if (req.body.isTrending !== undefined) {
-      const v = toBool(req.body.isTrending);
+    product.images = mergedImages;
+    product.image = mergedImages[0];
+
+    // ---------- Flags ----------
+    if (b.isTrending !== undefined) {
+      const v = toBool(b.isTrending);
       product.isTrending = v;
       product.trending = v;
     }
 
-    if (req.body.isFeatured !== undefined) {
-      const v = toBool(req.body.isFeatured);
+    if (b.isFeatured !== undefined) {
+      const v = toBool(b.isFeatured);
       product.isFeatured = v;
       product.featured = v;
     }
 
-    if (req.body.isDeal !== undefined) {
-      product.isDeal = toBool(req.body.isDeal);
+    if (b.isDeal !== undefined) {
+      product.isDeal = toBool(b.isDeal);
     }
 
     if (product.isDeal) {
-      product.dealPrice = req.body.dealPrice ? Number(req.body.dealPrice) : product.dealPrice;
-      product.dealEnds = req.body.dealEnds ? new Date(req.body.dealEnds) : product.dealEnds;
-      product.discount = req.body.discount || product.discount;
+      const dealPrice = b.dealPrice ? Number(b.dealPrice) : product.dealPrice;
+      const dealEnds = b.dealEnds ? new Date(b.dealEnds) : product.dealEnds;
+      if (!dealPrice) return fail(400, 'Deal price is required for deal products');
+      if (!dealEnds) return fail(400, 'Deal end date is required for deal products');
+
+      product.dealPrice = dealPrice;
+      product.dealEnds = dealEnds;
+      product.discount = b.discount || product.discount;
       product.originalPrice = product.price;
+    } else {
+      // Deal band hai to purana deal data saaf karo
+      product.dealPrice = undefined;
+      product.dealEnds = undefined;
+      product.discount = undefined;
+      product.originalPrice = undefined;
     }
 
-    const updatedProduct = await product.save();
+    const updatedProduct = await product.save(); // hooks (flag sync, stock sum) yahin chalte hain
+
+    // Save successful hone ke baad hi hataayi gayi purani images Cloudinary se delete karo
+    if (removedImages.length > 0) {
+      await deleteUnusedCloudImages(removedImages, product._id);
+    }
 
     res.json({
       success: true,
@@ -509,10 +624,10 @@ export const deleteProduct = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Product not found' });
     }
 
-    // Cloudinary se images hatao (purani /uploads images skip hoti hain)
-    await deleteCloudImages(product.images || []);
-
     await Product.findByIdAndDelete(req.params.id);
+
+    // Cloudinary se images hatao (jo duplicate products me use ho rahi hain wo bachi rahengi)
+    await deleteUnusedCloudImages(product.images || [], product._id);
 
     res.json({ success: true, message: 'Product deleted permanently' });
   } catch (error) {
@@ -576,6 +691,7 @@ export const duplicateProduct = async (req, res) => {
 
     const productData = product.toObject();
     delete productData._id;
+    delete productData.id;
     delete productData.createdAt;
     delete productData.updatedAt;
     delete productData.__v;
@@ -584,6 +700,10 @@ export const duplicateProduct = async (req, res) => {
     productData.isActive = true;
     productData.views = 0;
     productData.sold = 0;
+    // Copy me purane customer reviews nahi jaane chahiye
+    productData.reviews = [];
+    productData.rating = 0;
+    productData.numReviews = 0;
 
     const duplicatedProduct = await Product.create(productData);
 
@@ -604,6 +724,14 @@ export const duplicateProduct = async (req, res) => {
 export const createReview = async (req, res) => {
   try {
     const { rating, comment } = req.body;
+
+    if (!rating || Number(rating) < 1 || Number(rating) > 5 || !comment) {
+      return res.status(400).json({
+        success: false,
+        message: 'Rating (1-5) aur comment dono zaroori hain'
+      });
+    }
+
     const product = await Product.findById(req.params.id);
 
     if (!product) {
@@ -625,12 +753,18 @@ export const createReview = async (req, res) => {
       user: req.user._id
     });
     product.numReviews = product.reviews.length;
-    product.rating =
-      product.reviews.reduce((acc, r) => acc + r.rating, 0) / product.reviews.length;
+    product.rating = Number(
+      (product.reviews.reduce((acc, r) => acc + r.rating, 0) / product.reviews.length).toFixed(1)
+    );
 
     await product.save();
 
-    res.status(201).json({ success: true, message: 'Review added successfully' });
+    res.status(201).json({
+      success: true,
+      message: 'Review added successfully',
+      rating: product.rating,
+      numReviews: product.numReviews
+    });
   } catch (error) {
     console.error('❌ Create review error:', error);
     res.status(500).json({ success: false, message: error.message });
@@ -649,6 +783,8 @@ export const getFilteredProducts = async (req, res) => {
       minPrice,
       maxPrice,
       brand,
+      size,
+      minRating,
       sort = 'createdAt',
       order = 'desc',
       search = '',
@@ -664,6 +800,11 @@ export const getFilteredProducts = async (req, res) => {
     if (includeInactive !== 'true') filter.isActive = true;
     if (category && category !== 'all') filter.category = category;
     if (brand && brand !== 'all') filter.brand = brand;
+
+    if (size) {
+      filter.sizes = { $elemMatch: { size: String(size).toUpperCase(), stock: { $gt: 0 } } };
+    }
+    if (minRating) filter.rating = { $gte: parseFloat(minRating) };
 
     if (minPrice || maxPrice) {
       filter.price = {};
@@ -713,9 +854,14 @@ export const getFilteredProducts = async (req, res) => {
 // @access  Private/Admin
 export const getLowStockProducts = async (req, res) => {
   try {
+    // Ya to total stock kam hai, ya kisi size ka stock khatam / kam hai
     const lowStockProducts = await Product.find({
-      countInStock: { $lt: 10 }
-    }).select('name countInStock price images image brand isFeatured isTrending');
+      isActive: true,
+      $or: [
+        { countInStock: { $lt: 10 } },
+        { sizes: { $elemMatch: { stock: { $lt: 3 } } } }
+      ]
+    }).select('name countInStock sizes price images image brand isFeatured isTrending');
 
     res.json({ success: true, data: lowStockProducts });
   } catch (error) {
@@ -813,10 +959,11 @@ export const bulkUpdateProducts = async (req, res) => {
         update = { isDeal: value };
         break;
       case 'isFeatured':
-        update = { isFeatured: value };
+        // legacy field bhi sync (updateMany me pre-save hook nahi chalta)
+        update = { isFeatured: value, featured: value };
         break;
       case 'isTrending':
-        update = { isTrending: value };
+        update = { isTrending: value, trending: value };
         break;
       case 'isActive':
         update = { isActive: value };
@@ -853,7 +1000,7 @@ export const bulkUpdateProducts = async (req, res) => {
 export const exportProducts = async (req, res) => {
   try {
     const products = await Product.find({ isActive: true }).select(
-      'name price description category brand countInStock isDeal isFeatured isTrending rating numReviews'
+      'name price description category brand countInStock sizes isDeal isFeatured isTrending rating numReviews'
     );
 
     const csvData = products.map((p) => ({
@@ -863,6 +1010,7 @@ export const exportProducts = async (req, res) => {
       Category: p.category,
       Brand: p.brand,
       Stock: p.countInStock,
+      Sizes: (p.sizes || []).map((s) => `${s.size}:${s.stock}`).join(' | '),
       'Is Deal': p.isDeal ? 'Yes' : 'No',
       'Is Featured': p.isFeatured ? 'Yes' : 'No',
       'Is Trending': p.isTrending ? 'Yes' : 'No',
